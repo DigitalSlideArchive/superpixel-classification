@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<executable>
+  <category>HistomicsTK</category>
+  <title>Superpixel Classification</title>
+  <description>Classify Superpixels</description>
+  <version>0.1.0</version>
+  <documentation-url>https://digitalslidearchive.github.io/HistomicsTK</documentation-url>
+  <license>Apache 2.0</license>
+  <contributor>David Manthey (Kitware Inc)</contributor>
+  <acknowledgements>This work is part of the HistomicsTK project.</acknowledgements>
+  <parameters>
+    <label>I/O</label>
+    <description>Input/output parameters.</description>
+    <directory>
+      <name>images</name>
+      <description>The directory of images to use for prediction or training</description>
+      <label>Image Directory</label>
+      <channel>input</channel>
+      <index>0</index>
+    </directory>    
+    <string>
+      <name>annotationName</name>
+      <longflag>annotationame</longflag>
+      <label>Annotation Base Name</label>
+      <description>Annotations with this name will be used for finding user labels and generating features</description>
+      <default>Superpixel</default>
+    </string>
+    
+    <directory>
+      <name>features</name>
+      <longflag>features</longflag>
+      <description>A directory to store and load features extracted from the images</description>
+      <label>Feature Directory</label>
+      <channel>input</channel>
+    </directory>
+    <integer>
+      <name>patchSize</name>
+      <longflag>patchsize</longflag>
+      <label>Patch Size</label>
+      <channel>input</channel>
+      <default>100</default>
+      <description>The image size used for feature extraction</description>
+    </integer>
+    <directory>
+      <name>modeldir</name>
+      <longflag>modeldir</longflag>
+      <description>A directory to store and load the model</description>
+      <label>Model Directory</label>
+      <channel>input</channel>
+    </directory>
+  </parameters>
+  <parameters>
+    <label>Superpixels</label>
+    <description>Superpixel parameters</description>
+    <boolean>
+      <name>gensuperpixels</name>
+      <longflag>generate-superpxiels</longflag>
+      <description>If an image does not have an annotation with superpixels, generate one</description>
+      <label>Generate superpixels</label>
+      <default>true</default>
+    </boolean>
+    <integer>
+      <name>radius</name>
+      <longflag>radius</longflag>
+      <label>Approximate radius</label>
+      <channel>input</channel>
+      <default>100</default>
+      <description>Approximate superpixel radius is pixels</description>
+    </integer>
+    <float>
+      <name>magnification</name>
+      <longflag>magnification</longflag>
+      <label>Magnficiation</label>
+      <channel>input</channel>
+      <default>5</default>
+      <description>Image magnficiation for superpixel generation</description>
+    </float>
+    <directory>
+      <name>annotationDir</name>
+      <longflag>annotationdir</longflag>
+      <description>A directory to store superpixel annotation images</description>
+      <label>Annotation Directory</label>
+      <channel>input</channel>
+    </directory>
+  </parameters>
+  <parameters>
+    <label>Training</label>
+    <description>Training parameters</description>
+    <boolean>
+      <name>train</name>
+      <longflag>train</longflag>
+      <description>Train the model based on the newest user annotations</description>
+      <label>Train model</label>
+      <default>true</default>
+    </boolean>
+    <integer>
+      <name>batchSize</name>
+      <longflag>batchsize</longflag>
+      <label>Batch Size</label>
+      <channel>input</channel>
+      <default>32</default>
+      <description>Training batch size</description>
+    </integer>
+    <integer>
+      <name>epochs</name>
+      <longflag>epochs</longflag>
+      <label>Epochs</label>
+      <channel>input</channel>
+      <default>100</default>
+      <description>Training epochs</description>
+    </integer>
+    <float>
+      <name>split</name>
+      <longflag>split</longflag>
+      <label>Training Split</label>
+      <channel>input</channel>
+      <default>0.8</default>
+      <description>Training / validation split (0 to 1)</description>
+    </float>
+    <boolean>
+      <name>randominput</name>
+      <longflag>randomInput</longflag>
+      <label>Random Input</label>
+      <description>Start with random input</description>
+      <default>false</default>
+    </boolean>
+    <string-vector>
+      <name>labels</name>
+      <longflag>labels</longflag>
+      <label>Labels</label>
+      <description>Labels for random input</description>
+      <default>Tissue,Background,Marker</default>
+    </string-vector>
+  </parameters>
+  <parameters advanced="true">
+    <label>Girder API URL and Key</label>
+    <description>A Girder API URL and token for Girder client</description>
+    <string>
+      <name>girderApiUrl</name>
+      <longflag>api-url</longflag>
+      <label>Girder API URL</label>
+      <description>A Girder API URL (e.g., https://girder.example.com:443/api/v1)</description>
+      <default></default>
+    </string>
+    <string>
+      <name>girderToken</name>
+      <longflag>girder-token</longflag>
+      <label>Girder Token</label>
+      <description>A Girder token</description>
+      <default></default>
+    </string>
+    <integer>
+      <name>numWorkers</name>
+      <longflag>workers</longflag>
+      <label>Numebr of Workers</label>
+      <channel>input</channel>
+      <default>4</default>
+      <description>The number of worker threads for superpixel and feature generation</description>
+    </integer>
+  </parameters>
+</executable>
+
