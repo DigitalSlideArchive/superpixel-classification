@@ -70,10 +70,10 @@
     <float>
       <name>magnification</name>
       <longflag>magnification</longflag>
-      <label>Magnficiation</label>
+      <label>Magnification</label>
       <channel>input</channel>
       <default>5</default>
-      <description>Image magnficiation for superpixel generation</description>
+      <description>Image magnification for superpixel generation</description>
     </float>
     <directory>
       <name>annotationDir</name>
@@ -152,7 +152,7 @@
     <integer>
       <name>numWorkers</name>
       <longflag>workers</longflag>
-      <label>Numebr of Workers</label>
+      <label>Number of Workers</label>
       <channel>input</channel>
       <default>4</default>
       <description>The number of worker threads for superpixel and feature generation</description>
