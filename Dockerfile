@@ -1,5 +1,5 @@
-FROM python:3.9-slim
-
+# FROM python:3.9-slim
+FROM tensorflow/tensorflow:latest-gpu
 
 RUN python -m pip install histomicstk --find-links https://girder.github.io/large_image_wheels
 
