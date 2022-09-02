@@ -1,5 +1,8 @@
-FROM python:3.9-slim
+# FROM python:3.9-slim
+FROM tensorflow/tensorflow:latest-gpu
 
+# This tells girder_worker to enable gpu if possible
+LABEL com.nvidia.volumes.needed=nvidia_driver
 
 RUN python -m pip install histomicstk --find-links https://girder.github.io/large_image_wheels
 
