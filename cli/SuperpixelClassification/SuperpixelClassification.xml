@@ -11,13 +11,14 @@
   <parameters>
     <label>I/O</label>
     <description>Input/output parameters.</description>
-    <directory>
+    <string>
       <name>images</name>
       <description>The directory of images to use for prediction or training</description>
       <label>Image Directory</label>
       <channel>input</channel>
       <index>0</index>
-    </directory>    
+      <default></default>
+    </string>
     <string>
       <name>annotationName</name>
       <longflag>annotationame</longflag>
@@ -25,14 +26,15 @@
       <description>Annotations with this name will be used for finding user labels and generating features</description>
       <default>Superpixel</default>
     </string>
-    
-    <directory>
+
+    <string>
       <name>features</name>
       <longflag>features</longflag>
       <description>A directory to store and load features extracted from the images</description>
       <label>Feature Directory</label>
       <channel>input</channel>
-    </directory>
+      <default></default>
+    </string>
     <integer>
       <name>patchSize</name>
       <longflag>patchsize</longflag>
@@ -41,13 +43,14 @@
       <default>100</default>
       <description>The image size used for feature extraction</description>
     </integer>
-    <directory>
+    <string>
       <name>modeldir</name>
       <longflag>modeldir</longflag>
       <description>A directory to store and load the model</description>
       <label>Model Directory</label>
       <channel>input</channel>
-    </directory>
+      <default></default>
+    </string>
   </parameters>
   <parameters>
     <label>Superpixels</label>
@@ -75,13 +78,14 @@
       <default>5</default>
       <description>Image magnification for superpixel generation</description>
     </float>
-    <directory>
+    <string>
       <name>annotationDir</name>
       <longflag>annotationdir</longflag>
       <description>A directory to store superpixel annotation images</description>
       <label>Annotation Directory</label>
       <channel>input</channel>
-    </directory>
+      <default></default>
+    </string>
   </parameters>
   <parameters>
     <label>Training</label>
