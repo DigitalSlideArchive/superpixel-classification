@@ -338,6 +338,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
     with h5py.File(featurePath, 'r') as ffptr:
         # Create predicted annotation
         annot = copy.deepcopy(annotrec)
+        annot['elements'][0].pop('id', None)
         annot['name'] = '%s Epoch %d Predictions' % (annotationName, curEpoch)
         annot['elements'][0]['categories'] = [groups[key] for key in labels]
         values = annot['elements'][0]['values']
@@ -368,6 +369,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
             }))
         # Upload new user annotation
         newAnnot = annotrec.copy()
+        newAnnot['elements'][0].pop('id', None)
         newAnnot['name'] = '%s Epoch %d' % (annotationName, curEpoch + 1)
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % newAnnot['name'])
         with open(outAnnotationPath, 'w') as annotation_file:
