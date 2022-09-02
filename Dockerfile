@@ -22,4 +22,7 @@ WORKDIR /opt/scw/cli
 RUN python -m slicer_cli_web.cli_list_entrypoint --list_cli
 RUN python -m slicer_cli_web.cli_list_entrypoint SuperpixelClassification --help
 
+# This makes the results show up in a more timely manner
+ENV PYTHONUNBUFFERED=TRUE
+
 ENTRYPOINT ["/bin/bash", "docker-entrypoint.sh"]
