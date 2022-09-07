@@ -101,6 +101,7 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
               max(annot['elements'][0]['user']['bbox'][3::4]))
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(annot, annotation_file, indent=2, sort_keys=False)
+        count = len(gc.get('annotation', parameters=dict(itemId=item['_id'])))
         gc.uploadFileToItem(
             item['_id'], outAnnotationPath,
             reference=json.dumps({
@@ -109,6 +110,12 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
                 'fileId': item['largeImage']['fileId'],
                 'userId': userId,
             }))
+        # Wait for the upload to complete
+        waittime = time.time()
+        while time.time() - waittime < 120:
+            if len(gc.get('annotation', parameters=dict(itemId=item['_id']))) > count:
+                break
+            time.sleep(0.1)
         print('Created superpixels')
 
 
@@ -205,6 +212,7 @@ def createFeatures(gc, folderId, annotationName, featureFolderId, patchSize,
                 results[item['_id']] = file
         except Exception:
             pass
+    print('Found %d item(s) with features' % len(results))
     return results
 
 
@@ -274,6 +282,9 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
                 trainModelAddItem(
                     gc, record, item, annotrec, elem,
                     features.get(item['_id']), randomInput, labelList)
+            if not record['ds']:
+                print('No labelled data')
+                return
             record['labelds'] = fptr.create_dataset(
                 'labels', (len(record['labelvals']), ), dtype=int)
             record['labelds'] = np.array(record['labelvals'], dtype=int)
@@ -391,11 +402,15 @@ def predictLabels(gc, folderId, annotationName, features, modelFolderId,
     folder = gc.getFolder(folderId)
     userId = folder['creatorId']
     with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
+        modelFile = None
         for item in gc.listResource(
                 'item', {'folderId': modelFolderId, 'sort': 'updated', 'sortdir': -1}):
             if annotationName in item['name'] and 'model' in item['name'].lower():
                 modelFile = next(gc.listFile(item['_id'], limit=1))
                 break
+        if not modelFile:
+            print('No model file found')
+            return
         print(modelFile['name'], item)
         modelPath = os.path.join(tempdir, modelFile['name'])
         gc.downloadFile(modelFile['_id'], modelPath)
