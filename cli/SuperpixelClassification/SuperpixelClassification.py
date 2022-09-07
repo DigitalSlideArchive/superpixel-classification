@@ -101,8 +101,8 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
               max(annot['elements'][0]['user']['bbox'][3::4]))
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(annot, annotation_file, indent=2, sort_keys=False)
-        gc.uploadFileToFolder(
-            annotationFolderId, outAnnotationPath,
+        gc.uploadFileToItem(
+            item['_id'], outAnnotationPath,
             reference=json.dumps({
                 'identifier': 'LargeImageAnnotationUpload',
                 'itemId': item['_id'],
@@ -359,8 +359,8 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % annot['name'])
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(annot, annotation_file, indent=2, sort_keys=False)
-        gc.uploadFileToFolder(
-            annotationFolderId, outAnnotationPath,
+        gc.uploadFileToItem(
+            item['_id'], outAnnotationPath,
             reference=json.dumps({
                 'identifier': 'LargeImageAnnotationUpload',
                 'itemId': item['_id'],
@@ -374,8 +374,8 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % newAnnot['name'])
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(newAnnot, annotation_file, indent=2, sort_keys=False)
-        gc.uploadFileToFolder(
-            annotationFolderId, outAnnotationPath,
+        gc.uploadFileToItem(
+            item['_id'], outAnnotationPath,
             reference=json.dumps({
                 'identifier': 'LargeImageAnnotationUpload',
                 'itemId': item['_id'],
