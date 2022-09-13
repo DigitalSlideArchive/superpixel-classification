@@ -131,6 +131,13 @@
       <description>Labels for random input</description>
       <default>Tissue,Background,Marker</default>
     </string-vector>
+    <boolean>
+      <name>heatmaps</name>
+      <longflag>heatmaps</longflag>
+      <description>Generate heatmap annotations</description>
+      <label>Generate heatmaps for attention and uncertainty</label>
+      <default>false</default>
+    </boolean>
   </parameters>
   <parameters advanced="true">
     <label>Girder API URL and Key</label>
