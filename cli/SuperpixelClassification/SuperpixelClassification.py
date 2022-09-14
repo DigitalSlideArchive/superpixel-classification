@@ -149,53 +149,35 @@ def createFeaturesForItem(gc, item, elem, featureFolderId, fileName,
         with h5py.File(filePath, 'w') as fptr:
             for idx, _ in enumerate(elem['values']):
                 bbox = elem['user']['bbox'][idx * 4:idx * 4 + 4]
-                # Use central square
-                if False:
-                    # Adjust to make bbox square
-                    if bbox[2] - bbox[0] > bbox[3] - bbox[1]:
-                        bbox[0] = int((bbox[0] + bbox[2]) / 2 - (bbox[3] - bbox[1]) / 2)
-                        bbox[2] = bbox[0] + bbox[3] - bbox[1]
-                    else:
-                        bbox[1] = int((bbox[1] + bbox[3]) / 2 - (bbox[2] - bbox[0]) / 2)
-                        bbox[3] = bbox[1] + bbox[2] - bbox[0]
-                    patch = pickle.loads(gc.get(f'item/{item["_id"]}/tiles/region', parameters=dict(
-                        left=int(bbox[0]), top=int(bbox[1]),
-                        right=int(bbox[2]), bottom=int(bbox[3]),
-                        width=patchSize, height=patchSize, fill='#000',
-                        encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL)
-                    ), jsonResp=False).content)
-                    if patch.shape[2] in (2, 4):
-                        patch = patch[:, :, :-1]
                 # use masked superpixel
-                else:
-                    patch = pickle.loads(gc.get(f'item/{item["_id"]}/tiles/region', parameters=dict(
-                        left=int(bbox[0]), top=int(bbox[1]),
-                        right=int(bbox[2]), bottom=int(bbox[3]),
+                patch = pickle.loads(gc.get(f'item/{item["_id"]}/tiles/region', parameters=dict(
+                    left=int(bbox[0]), top=int(bbox[1]),
+                    right=int(bbox[2]), bottom=int(bbox[3]),
+                    width=patchSize, height=patchSize, fill='#000',
+                    encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL)
+                ), jsonResp=False).content)
+                if patch.shape[2] in (2, 4):
+                    patch = patch[:, :, :-1]
+                scale = 1
+                try:
+                    scale = elem['transform']['matrix'][0][0]
+                except Exception:
+                    pass
+                mask = pickle.loads(gc.get(
+                    f'item/{elem["girderId"]}/tiles/region', parameters=dict(
+                        left=int(bbox[0] / scale), top=int(bbox[1] / scale),
+                        right=int(bbox[2] / scale), bottom=int(bbox[3] / scale),
                         width=patchSize, height=patchSize, fill='#000',
                         encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL)
                     ), jsonResp=False).content)
-                    if patch.shape[2] in (2, 4):
-                        patch = patch[:, :, :-1]
-                    scale = 1
-                    try:
-                        scale = elem['transform']['matrix'][0][0]
-                    except Exception:
-                        pass
-                    mask = pickle.loads(gc.get(
-                        f'item/{elem["girderId"]}/tiles/region', parameters=dict(
-                            left=int(bbox[0] / scale), top=int(bbox[1] / scale),
-                            right=int(bbox[2] / scale), bottom=int(bbox[3] / scale),
-                            width=patchSize, height=patchSize, fill='#000',
-                            encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL)
-                        ), jsonResp=False).content)
-                    if mask.shape[2] == 4:
-                        mask = mask[:, :, :-1]
-                    maskvals = [
-                        [val % 256, val // 256 % 256, val // 65536 % 256]
-                        for val in [idx * 2, idx * 2 + 1]]
-                    patch = patch.copy()
-                    patch[(mask != maskvals[0]).any(axis=-1) &
-                          (mask != maskvals[1]).any(axis=-1)] = [0, 0, 0]
+                if mask.shape[2] == 4:
+                    mask = mask[:, :, :-1]
+                maskvals = [
+                    [val % 256, val // 256 % 256, val // 65536 % 256]
+                    for val in [idx * 2, idx * 2 + 1]]
+                patch = patch.copy()
+                patch[(mask != maskvals[0]).any(axis=-1) &
+                      (mask != maskvals[1]).any(axis=-1)] = [0, 0, 0]
                 # TODO: ensure this is uint8
                 if not ds:
                     ds = fptr.create_dataset(
@@ -427,88 +409,96 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
                 'userId': userId,
             }))
         if makeHeatmaps:
-            scale = 1
-            try:
-                scale = elem['transform']['matrix'][0][0]
-            except Exception:
-                pass
-            heatmaps = []
-            bbox = elem['user']['bbox']
-            for idx, key in enumerate(labels):
-                fillColor = re.search(
-                    r'(rgba\(\s*[0-9.]+\s*,\s*[0-9.]+\s*,\s*[0-9.]+)(\s*,\s*[0-9.]+\s*\))',
-                    groups[key]['fillColor'])
-                fillColor = (
-                    fillColor.groups()[0] + ',1)') if fillColor else groups[key]['fillColor']
-                heatmaps.append({
-                    'name': 'Attention Logit Epoch %d' % (curEpoch),
-                    'description': 'Attention Logit for %s - %s Epoch %d' % (
-                        annotationName, key, curEpoch),
-                    'elements': [{
-                        'type': 'heatmap',
-                        'group': key,
-                        'label': {'value': 'Attention Logit %s' % key},
-                        'radius': radius * scale * 2,
-                        'scaleWithZoom': True,
-                        'points': [[
-                            (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
-                            (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
-                            0,
-                            float(catConf[ci][idx])] for ci in range(len(catConf))],
-                        'colorRange': ['rgba(0,0,0,0)', fillColor],
-                        'rangeValues': [0, 1],
-                        'normalizeRange': True,
-                    }]})
-                heatmaps.append({
-                    'name': 'Attention Epoch %d' % (curEpoch),
-                    'description': 'Attention for %s - %s Epoch %d' % (
-                        annotationName, key, curEpoch),
-                    'elements': [{
-                        'type': 'heatmap',
-                        'group': key,
-                        'label': {'value': 'Attention %s' % key},
-                        'radius': radius * scale * 2,
-                        'scaleWithZoom': True,
-                        'points': [[
-                            (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
-                            (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
-                            0,
-                            float(catWeights[ci][idx])] for ci in range(len(catWeights))],
-                        'colorRange': ['rgba(0,0,0,0)', fillColor],
-                        'rangeValues': [0, 1],
-                        'normalizeRange': False,
-                    }]})
-            heatmaps.append({
-                'name': 'Uncertainty Epoch %d' % (curEpoch),
-                'description': 'Uncertainty for %s Epoch %d' % (annotationName, curEpoch),
-                'elements': [{
-                    'type': 'heatmap',
-                    'group': 'default',
-                    'label': {'value': 'Uncertainty'},
-                    'radius': radius * scale * 2,
-                    'scaleWithZoom': True,
-                    'points': [[
-                        (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
-                        (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
-                        0,
-                        1 - conf[ci]] for ci in range(len(conf))],
-                    'colorRange': [
-                        'rgba(0,0,0,0)', 'rgba(0,0,255,0.75)',
-                        'rgba(255,255,0,0.9)', 'rgba(255,0,0,1)'],
-                    'rangeValues': [0, 0.5, 0.75, 1],
-                    'normalizeRange': False,
-                }]})
-            outAnnotationPath = os.path.join(tempdir, '%s.anot' % heatmaps[-1]['name'])
-            with open(outAnnotationPath, 'w') as annotation_file:
-                json.dump(heatmaps, annotation_file, indent=2, sort_keys=False)
-            gc.uploadFileToItem(
-                item['_id'], outAnnotationPath,
-                reference=json.dumps({
-                    'identifier': 'LargeImageAnnotationUpload',
-                    'itemId': item['_id'],
-                    'fileId': item['largeImage']['fileId'],
-                    'userId': userId,
-                }))
+            makeHeatmapsForItem(
+                gc, annotationName, userId, tempdir, radius, item, elem,
+                labels, groups, curEpoch, conf, catWeights, catConf)
+
+
+def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
+                        elem, labels, groups, curEpoch, conf, catWeights,
+                        catConf):
+    scale = 1
+    try:
+        scale = elem['transform']['matrix'][0][0]
+    except Exception:
+        pass
+    heatmaps = []
+    bbox = elem['user']['bbox']
+    for idx, key in enumerate(labels):
+        fillColor = re.search(
+            r'(rgba\(\s*[0-9.]+\s*,\s*[0-9.]+\s*,\s*[0-9.]+)(\s*,\s*[0-9.]+\s*\))',
+            groups[key]['fillColor'])
+        fillColor = (
+            fillColor.groups()[0] + ',1)') if fillColor else groups[key]['fillColor']
+        heatmaps.append({
+            'name': 'Attention Logit Epoch %d' % (curEpoch),
+            'description': 'Attention Logit for %s - %s Epoch %d' % (
+                annotationName, key, curEpoch),
+            'elements': [{
+                'type': 'heatmap',
+                'group': key,
+                'label': {'value': 'Attention Logit %s' % key},
+                'radius': radius * scale * 2,
+                'scaleWithZoom': True,
+                'points': [[
+                    (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
+                    (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
+                    0,
+                    float(catConf[ci][idx])] for ci in range(len(catConf))],
+                'colorRange': ['rgba(0,0,0,0)', fillColor],
+                'rangeValues': [0, 1],
+                'normalizeRange': True,
+            }]})
+        heatmaps.append({
+            'name': 'Attention Epoch %d' % (curEpoch),
+            'description': 'Attention for %s - %s Epoch %d' % (
+                annotationName, key, curEpoch),
+            'elements': [{
+                'type': 'heatmap',
+                'group': key,
+                'label': {'value': 'Attention %s' % key},
+                'radius': radius * scale * 2,
+                'scaleWithZoom': True,
+                'points': [[
+                    (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
+                    (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
+                    0,
+                    float(catWeights[ci][idx])] for ci in range(len(catWeights))],
+                'colorRange': ['rgba(0,0,0,0)', fillColor],
+                'rangeValues': [0, 1],
+                'normalizeRange': False,
+            }]})
+    heatmaps.append({
+        'name': 'Uncertainty Epoch %d' % (curEpoch),
+        'description': 'Uncertainty for %s Epoch %d' % (annotationName, curEpoch),
+        'elements': [{
+            'type': 'heatmap',
+            'group': 'default',
+            'label': {'value': 'Uncertainty'},
+            'radius': radius * scale * 2,
+            'scaleWithZoom': True,
+            'points': [[
+                (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
+                (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
+                0,
+                1 - conf[ci]] for ci in range(len(conf))],
+            'colorRange': [
+                'rgba(0,0,0,0)', 'rgba(0,0,255,0.75)',
+                'rgba(255,255,0,0.9)', 'rgba(255,0,0,1)'],
+            'rangeValues': [0, 0.5, 0.75, 1],
+            'normalizeRange': False,
+        }]})
+    outAnnotationPath = os.path.join(tempdir, '%s.anot' % heatmaps[-1]['name'])
+    with open(outAnnotationPath, 'w') as annotation_file:
+        json.dump(heatmaps, annotation_file, indent=2, sort_keys=False)
+    gc.uploadFileToItem(
+        item['_id'], outAnnotationPath,
+        reference=json.dumps({
+            'identifier': 'LargeImageAnnotationUpload',
+            'itemId': item['_id'],
+            'fileId': item['largeImage']['fileId'],
+            'userId': userId,
+        }))
 
 
 def predictLabels(gc, folderId, annotationName, features, modelFolderId,
