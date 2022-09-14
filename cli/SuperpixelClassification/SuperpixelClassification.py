@@ -359,12 +359,12 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
             model.save(modelPath)
             print(repr(record['labels']), repr(record['groups']))
             with h5py.File(modelPath, 'r+') as mptr:
-                mptr.create_dataset('labels', data=[
-                    pickle.dumps(record['labels'], protocol=0)])
-                mptr.create_dataset('groups', data=[
-                    pickle.dumps(record['groups'], protocol=0)])
-                mptr.create_dataset('history', data=[
-                    pickle.dumps(history, protocol=0)])
+                mptr.create_dataset('labels', data=np.void(
+                    pickle.dumps(record['labels'])))
+                mptr.create_dataset('groups', data=np.void(
+                    pickle.dumps(record['groups'])))
+                mptr.create_dataset('history', data=np.void(
+                    pickle.dumps(history)))
         modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
         print('Saved model')
         return modelFile
@@ -532,8 +532,8 @@ def predictLabels(gc, folderId, annotationName, features, modelFolderId,
         gc.downloadFile(modelFile['_id'], modelPath)
         model = tf.keras.models.load_model(modelPath)
         with h5py.File(modelPath, 'r+') as mptr:
-            labels = pickle.loads(mptr['labels'][0])
-            groups = pickle.loads(mptr['groups'][0])
+            labels = pickle.loads(mptr['labels'][()].tobytes())
+            groups = pickle.loads(mptr['groups'][()].tobytes())
         for label in labels:
             if label not in groups:
                 ll = len(groups)
