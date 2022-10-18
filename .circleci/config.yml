@@ -1,0 +1,34 @@
+version: 2
+
+jobs:
+  publish_docker:
+    working_directory: ~/project
+    machine:
+      image: ubuntu-2004:202111-02
+    steps:
+      - checkout
+      - run:
+          name: Build docker
+          command: docker build --force-rm -t dsarchive/superpixel .
+      - run:
+          name: Publish images to Docker Hub
+          command: |
+              echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+              docker push dsarchive/superpixel:latest
+              if [[ $CIRCLE_TAG =~ ^v.*$ ]]; then
+              docker tag dsarchive/superpixel:latest "dsarchive/superpixel:$CIRCLE_TAG"
+              docker push "dsarchive/superpixel:$CIRCLE_TAG"
+              fi
+
+workflows:
+  version: 2
+
+  ci:
+    jobs:
+      - publish_docker:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              only:
+                - master
