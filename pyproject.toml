@@ -1,0 +1,26 @@
+[build-system]
+requires = [
+    "setuptools",
+    "setuptools_scm[toml]",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
+[project]
+name = "SuperpixelClassification"
+dynamic = ["version"]
+readme = "README.rst"
+classifiers = ["License :: OSI Approved :: Apache Software License"]
+requires-python = ">=3.6"
+dependencies = [
+    "girder-client",
+    "girder-slicer-cli-web",
+    "h5py",
+    "histomicstk",
+    "keras",
+    "tensorflow",
+    "torch<2",
+    "al_bench@git+https://github.com/Leengit/ALBench.git@certainty_factory",
+]
+

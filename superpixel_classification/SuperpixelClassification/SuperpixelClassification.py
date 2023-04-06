@@ -355,12 +355,21 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
 def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
                          model, item, annotrec, elem, feature, curEpoch,
                          userId, labels, groups, makeHeatmaps, radius,
-                         magnification):
+                         magnification, certainty):
+    import al_bench
+
     print('Predicting %s' % (item['name']))
     featurePath = os.path.join(tempdir, feature['name'])
     gc.downloadFile(feature['_id'], featurePath)
     annotrec = annotrec['annotation']
     annotrec['elements'] = [elem]
+
+    compCertainty = al_bench.factory.ComputeCertainty(
+        certainty,
+        (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50),
+        (0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999)
+    )
+
     with h5py.File(featurePath, 'r') as ffptr:
         # Create predicted annotation
         annot = copy.deepcopy(annotrec)
@@ -376,12 +385,19 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
         cats = [np.argmax(r) for r in predictions]
         # softmax to scale to 0 to 1
         catWeights = tf.nn.softmax(predictions)
+        certInputs = []
         for eidx, entry in enumerate(predictions):
             values[len(conf)] = int(cats[eidx])
             catConf.append([float(v) for v in entry])
-            # This is probably a poor confidence metric, as it is just the
-            # probability of the most likely class
+            certInputs.append([float(v) for v in catWeights[eidx]])
             conf.append(float(catWeights[eidx][cats[eidx]]))
+        cert = compCertainty.from_numpy_array(np.array(certInputs))
+        annot['elements'][0]['user']['certainty'] = list(cert[certainty]['scores'])
+        annot['elements'][0]['user']['certainty_info'] = {
+            'type': certainty,
+            'percentiles': cert[certainty]['percentiles'],
+            'cdf': cert[certainty]['cdf'],
+        }
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % annot['name'])
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(annot, annotation_file, indent=2, sort_keys=False)
@@ -411,7 +427,8 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
         if makeHeatmaps:
             makeHeatmapsForItem(
                 gc, annotationName, userId, tempdir, radius, item, elem,
-                labels, groups, curEpoch, conf, catWeights, catConf)
+                labels, groups, curEpoch,
+                annot['elements'][0]['user']['certainty'], catWeights, catConf)
 
 
 def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
@@ -468,6 +485,10 @@ def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
                 'rangeValues': [0, 1],
                 'normalizeRange': False,
             }]})
+
+    uncert = np.array(conf)
+    uncert = list(1 - (uncert - np.amin(uncert)) /
+                  ((np.amax(uncert) - np.amin(uncert)) or 1))
     heatmaps.append({
         'name': 'Uncertainty Epoch %d' % (curEpoch),
         'description': 'Uncertainty for %s Epoch %d' % (annotationName, curEpoch),
@@ -481,7 +502,7 @@ def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
                 (bbox[ci * 4] + bbox[ci * 4 + 2]) * 0.5,
                 (bbox[ci * 4 + 1] + bbox[ci * 4 + 3]) * 0.5,
                 0,
-                1 - conf[ci]] for ci in range(len(conf))],
+                uncert[ci]] for ci in range(len(uncert))],
             'colorRange': [
                 'rgba(0,0,0,0)', 'rgba(0,0,255,0.75)',
                 'rgba(255,255,0,0.9)', 'rgba(255,0,0,1)'],
@@ -502,7 +523,8 @@ def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
 
 
 def predictLabels(gc, folderId, annotationName, features, modelFolderId,
-                  annotationFolderId, saliencyMaps, radius, magnification):
+                  annotationFolderId, saliencyMaps, radius, magnification,
+                  certainty):
     itemsAndAnnot = getItemsAndAnnotations(gc, folderId, annotationName)
     curEpoch = getCurrentEpoch(itemsAndAnnot)
     folder = gc.getFolder(folderId)
@@ -550,7 +572,7 @@ def predictLabels(gc, folderId, annotationName, features, modelFolderId,
                 gc, annotationName, annotationFolderId, tempdir,
                 model, item, annotrec, elem, features.get(item['_id']),
                 curEpoch, userId, labels, groups, saliencyMaps, radius,
-                magnification)
+                magnification, certainty)
 
 
 def main(args):
@@ -577,7 +599,8 @@ def main(args):
 
     predictLabels(
         gc, args.images, args.annotationName, features, args.modeldir,
-        args.annotationDir, args.heatmaps, args.radius, args.magnification)
+        args.annotationDir, args.heatmaps, args.radius, args.magnification,
+        args.certainty)
 
 
 if __name__ == '__main__':
