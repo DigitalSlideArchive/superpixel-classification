@@ -356,7 +356,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
                          model, item, annotrec, elem, feature, curEpoch,
                          userId, labels, groups, makeHeatmaps, radius,
                          magnification, certainty):
-    import al_bench
+    import al_bench.factory
 
     print('Predicting %s' % (item['name']))
     featurePath = os.path.join(tempdir, feature['name'])
