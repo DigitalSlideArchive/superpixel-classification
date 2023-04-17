@@ -138,6 +138,16 @@
       <label>Generate heatmaps for attention and uncertainty</label>
       <default>false</default>
     </boolean>
+    <string-enumeration>
+      <name>certainty</name>
+      <label>Certainty Metric</label>
+      <description>The method used to deterime which superpixels have the most certain labels</description>
+      <longflag>certainty</longflag>
+      <default>confidence</default>
+      <element>confidence</element>
+      <element>margin</element>
+      <element>negative_entropy</element>
+    </string-enumeration>
   </parameters>
   <parameters advanced="true">
     <label>Girder API URL and Key</label>
