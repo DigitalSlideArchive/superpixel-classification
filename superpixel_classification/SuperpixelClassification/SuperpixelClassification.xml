@@ -48,6 +48,13 @@
       <label>Model Directory</label>
       <channel>input</channel>
     </directory>
+    <boolean>
+      <name>progress</name>
+      <longflag>progress</longflag>
+      <description>Report progress</description>
+      <label>Progress</label>
+      <default>true</default>
+    </boolean>
   </parameters>
   <parameters>
     <label>Superpixels</label>

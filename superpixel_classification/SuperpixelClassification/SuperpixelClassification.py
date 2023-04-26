@@ -16,6 +16,7 @@ import h5py
 import numpy as np
 import tensorflow as tf
 from histomicstk.cli.utils import CLIArgumentParser
+from progress_helper import ProgressHelper
 
 
 def getItemsAndAnnotations(gc, folderId, annotationName, missing=False):
@@ -55,7 +56,7 @@ def getCurrentEpoch(itemsAndAnnot):
 
 
 def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
-                             annotationFolderId, userId):
+                             annotationFolderId, userId, prog):
     from histomicstk.cli.SuperpixelSegmentation import SuperpixelSegmentation
 
     with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
@@ -90,7 +91,11 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
         )
         print(spopts)
 
+        prog.item_progress(item, 0.05)
+        # TODO: add a progress callback to the createSuperPixels method so
+        # we get more granular progress (requires a change in HistomicsTK).
         SuperpixelSegmentation.createSuperPixels(spopts)
+        prog.item_progress(item, 0.9)
         outImageFile = gc.uploadFileToFolder(annotationFolderId, outImagePath)
         outImageId = outImageFile['itemId']
         annot = json.loads(open(outAnnotationPath).read())
@@ -116,14 +121,18 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
             if len(gc.get('annotation', parameters=dict(itemId=item['_id']))) > count:
                 break
             time.sleep(0.1)
+        prog.item_progress(item, 1)
         print('Created superpixels')
 
 
 def createSuperpixels(gc, folderId, annotationName, radius, magnification,
-                      annotationFolderId, numWorkers):
+                      annotationFolderId, numWorkers, prog):
     items = getItemsAndAnnotations(gc, folderId, annotationName, True)
     if not len(items):
         return
+    prog.message('Creating superpixels')
+    prog.progress(0)
+    prog.items(items)
     print('Create superpixels as needed for %d item(s)' % len(items))
     folder = gc.getFolder(folderId)
     results = {}
@@ -133,14 +142,15 @@ def createSuperpixels(gc, folderId, annotationName, radius, magnification,
             futures.append((item, executor.submit(
                 createSuperpixelsForItem,
                 gc, annotationName, item, radius, magnification,
-                annotationFolderId, folder['creatorId'])))
+                annotationFolderId, folder['creatorId'], prog)))
+    prog.progress(1)
     for item, future in futures:
         results[item['_id']] = future.result()
     return results
 
 
 def createFeaturesForItem(gc, item, elem, featureFolderId, fileName,
-                          patchSize):
+                          patchSize, prog):
     print('Create feature', fileName)
     lastlog = starttime = time.time()
     ds = None
@@ -148,6 +158,7 @@ def createFeaturesForItem(gc, item, elem, featureFolderId, fileName,
         filePath = os.path.join(tempdir, fileName)
         with h5py.File(filePath, 'w') as fptr:
             for idx, _ in enumerate(elem['values']):
+                prog.item_progress(item, 0.9 * idx / len(elem['values']))
                 bbox = elem['user']['bbox'][idx * 4:idx * 4 + 4]
                 # use masked superpixel
                 patch = pickle.loads(gc.get(f'item/{item["_id"]}/tiles/region', parameters=dict(
@@ -195,12 +206,18 @@ def createFeaturesForItem(gc, item, elem, featureFolderId, fileName,
                           item['name'])
             print(ds.shape, len(elem['values']),
                   '%5.3f' % (time.time() - starttime), item['name'])
-        return gc.uploadFileToFolder(featureFolderId, filePath)
+        prog.item_progress(item, 0.9)
+        file = gc.uploadFileToFolder(featureFolderId, filePath)
+        prog.item_progress(item, 1)
+        return file
 
 
 def createFeatures(gc, folderId, annotationName, featureFolderId, patchSize,
-                   numWorkers):
+                   numWorkers, prog):
     itemsAndAnnot = getItemsAndAnnotations(gc, folderId, annotationName)
+    prog.message('Creating features')
+    prog.progress(0)
+    prog.items([item for item, _, _ in itemsAndAnnot])
     results = {}
     futures = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
@@ -218,7 +235,7 @@ def createFeatures(gc, folderId, annotationName, featureFolderId, patchSize,
             if not found:
                 futures.append((item, executor.submit(
                     createFeaturesForItem,
-                    gc, item, elem, featureFolderId, fileName, patchSize)))
+                    gc, item, elem, featureFolderId, fileName, patchSize, prog)))
     for item, future in futures:
         file = future.result()
         try:
@@ -226,6 +243,7 @@ def createFeatures(gc, folderId, annotationName, featureFolderId, patchSize,
                 results[item['_id']] = file
         except Exception:
             pass
+    prog.progress(1)
     print('Found %d item(s) with features' % len(results))
     return results
 
@@ -271,8 +289,32 @@ def trainModelAddItem(gc, record, item, annotrec, elem, feature, randomInput,
                       '%5.3f' % (time.time() - record['starttime']))
 
 
+class logProgress(tf.keras.callbacks.Callback):
+    def __init__(self, prog, total, start=0, width=1, item=None):
+        """Pass a porgress class and the total number of total"""
+        self.prog = prog
+        self.total = total
+        self.start = start
+        self.width = width
+        self.item = item
+
+    def on_epoch_end(self, epoch, logs=None):
+        val = ((epoch + 1) / self.total) * self.width + self.start
+        if self.item is None:
+            self.prog.progress(val)
+        else:
+            self.prog.item_progress(self.item, val)
+
+    def on_predict_batch_end(self, batch, logs=None):
+        val = ((batch + 1) / self.total) * self.width + self.start
+        if self.item is None:
+            self.prog.progress(val)
+        else:
+            self.prog.item_progress(self.item, val)
+
+
 def trainModel(gc, folderId, annotationName, features, modelFolderId,
-               batchSize, epochs, trainingSplit, randomInput, labelList):
+               batchSize, epochs, trainingSplit, randomInput, labelList, prog):
     itemsAndAnnot = getItemsAndAnnotations(gc, folderId, annotationName)
     with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
         trainingPath = os.path.join(tempdir, 'training.h5')
@@ -290,12 +332,15 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
                 'lastlog': time.time(),
                 'starttime': time.time(),
             }
-            for item, annotrec, elem in itemsAndAnnot:
+            prog.message('Collecting items for training')
+            for idx, (item, annotrec, elem) in enumerate(itemsAndAnnot):
+                prog.progress(idx / len(itemsAndAnnot))
                 if item['_id'] not in features:
                     continue
                 trainModelAddItem(
                     gc, record, item, annotrec, elem,
                     features.get(item['_id']), randomInput, labelList)
+            prog.progress(1)
             if not record['ds']:
                 print('No labelled data')
                 return
@@ -304,6 +349,8 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
             record['labelds'] = np.array(record['labelvals'], dtype=int)
             print(record['ds'].shape, record['counts'],
                   '%5.3f' % (time.time() - record['starttime']))
+            prog.message('Creating model')
+            prog.progress(0)
             # generate split
             full_ds = tf.data.Dataset.from_tensor_slices((record['ds'], record['labelds']))
             full_ds = full_ds.shuffle(1000)  # add seed=123 ?
@@ -312,6 +359,7 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
             train_ds = full_ds.take(train_size).batch(batchSize)
             val_ds = full_ds.skip(train_size).batch(batchSize)
             print(batchSize, train_ds, val_ds)
+            prog.progress(0.2)
             # make model
             num_classes = len(record['labels'])
             model = tf.keras.Sequential([
@@ -327,15 +375,23 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
                 tf.keras.layers.Dense(128, activation='relu'),
                 tf.keras.layers.Dense(num_classes)
             ])
+            prog.progress(0.4)
             model.compile(
                 optimizer='adam',
                 loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                 metrics=['accuracy'])
+            prog.progress(0.9)
+            prog.progress(1)
+            prog.message('Training model')
+            prog.progress(0)
             history = model.fit(
                 train_ds,
                 validation_data=val_ds,
-                epochs=epochs
+                epochs=epochs,
+                callbacks=[logProgress(prog, epochs)],
             )
+            prog.message('Saving model')
+            prog.progress(0)
             modelPath = os.path.join(tempdir, '%s Model Epoch %d.h5' % (
                 annotationName, getCurrentEpoch(itemsAndAnnot)))
             model.save(modelPath)
@@ -347,6 +403,7 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
                     pickle.dumps(record['groups'])))
                 mptr.create_dataset('history', data=np.void(
                     pickle.dumps(history)))
+            prog.progress(1)
         modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
         print('Saved model')
         return modelFile
@@ -355,7 +412,7 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
 def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
                          model, item, annotrec, elem, feature, curEpoch,
                          userId, labels, groups, makeHeatmaps, radius,
-                         magnification, certainty):
+                         magnification, certainty, batchSize, prog):
     import al_bench.factory
 
     print('Predicting %s' % (item['name']))
@@ -371,6 +428,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
     )
 
     with h5py.File(featurePath, 'r') as ffptr:
+        prog.item_progress(item, 0)
         # Create predicted annotation
         annot = copy.deepcopy(annotrec)
         annot['elements'][0].pop('id', None)
@@ -380,17 +438,25 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
         conf = annot['elements'][0]['user']['confidence'] = []
         catConf = annot['elements'][0]['user']['categoryConfidence'] = []
         ds = ffptr['images']
-        predictions = model.predict(ds)
+        prog.item_progress(item, 0.05)
+        predictions = model.predict(
+            ds, callbacks=[logProgress(
+                prog, (ds.shape[0] + batchSize - 1) // batchSize, 0.05, 0.35, item)],
+        )
+        prog.item_progress(item, 0.4)
         # scale to units
         cats = [np.argmax(r) for r in predictions]
         # softmax to scale to 0 to 1
         catWeights = tf.nn.softmax(predictions)
         certInputs = []
         for eidx, entry in enumerate(predictions):
+            if not eidx % batchSize:
+                prog.item_progress(item, 0.4 + 0.35 * eidx / len(predictions))
             values[len(conf)] = int(cats[eidx])
             catConf.append([float(v) for v in entry])
             certInputs.append([float(v) for v in catWeights[eidx]])
             conf.append(float(catWeights[eidx][cats[eidx]]))
+        prog.item_progress(item, 0.7)
         cert = compCertainty.from_numpy_array(np.array(certInputs))
         annot['elements'][0]['user']['certainty'] = list(cert[certainty]['scores'])
         annot['elements'][0]['user']['certainty_info'] = {
@@ -399,6 +465,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
             'cdf': cert[certainty]['cdf'],
         }
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % annot['name'])
+        prog.item_progress(item, 0.75)
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(annot, annotation_file, indent=2, sort_keys=False)
         gc.uploadFileToItem(
@@ -409,6 +476,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
                 'fileId': item['largeImage']['fileId'],
                 'userId': userId,
             }))
+        prog.item_progress(item, 0.8)
         # Upload new user annotation
         newAnnot = annotrec.copy()
         newAnnot['elements'][0].pop('id', None)
@@ -424,11 +492,13 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
                 'fileId': item['largeImage']['fileId'],
                 'userId': userId,
             }))
+        prog.item_progress(item, 0.85)
         if makeHeatmaps:
             makeHeatmapsForItem(
                 gc, annotationName, userId, tempdir, radius, item, elem,
                 labels, groups, curEpoch,
                 annot['elements'][0]['user']['certainty'], catWeights, catConf)
+        prog.item_progress(item, 1)
 
 
 def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
@@ -524,11 +594,13 @@ def makeHeatmapsForItem(gc, annotationName, userId, tempdir, radius, item,
 
 def predictLabels(gc, folderId, annotationName, features, modelFolderId,
                   annotationFolderId, saliencyMaps, radius, magnification,
-                  certainty):
+                  certainty, batchSize, prog):
     itemsAndAnnot = getItemsAndAnnotations(gc, folderId, annotationName)
     curEpoch = getCurrentEpoch(itemsAndAnnot)
     folder = gc.getFolder(folderId)
     userId = folder['creatorId']
+    prog.message('Predicting')
+    prog.progress(0)
     with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
         modelFile = None
         for item in gc.listResource(
@@ -565,6 +637,7 @@ def predictLabels(gc, folderId, annotationName, features, modelFolderId,
                         int(rgbtbl[ll % 6][2] * fac),
                     ),
                 }
+        prog.items([item for item, _, _ in itemsAndAnnot])
         for item, annotrec, elem in itemsAndAnnot:
             if item['_id'] not in features:
                 continue
@@ -572,7 +645,8 @@ def predictLabels(gc, folderId, annotationName, features, modelFolderId,
                 gc, annotationName, annotationFolderId, tempdir,
                 model, item, annotrec, elem, features.get(item['_id']),
                 curEpoch, userId, labels, groups, saliencyMaps, radius,
-                magnification, certainty)
+                magnification, certainty, batchSize, prog)
+        prog.progress(1)
 
 
 def main(args):
@@ -582,25 +656,27 @@ def main(args):
     gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
     gc.token = args.girderToken
 
-    if args.gensuperpixels:
-        createSuperpixels(
-            gc, args.images, args.annotationName, args.radius,
-            args.magnification, args.annotationDir, args.numWorkers)
+    with ProgressHelper(
+            'Superpixel Classification', 'Superpixel classification', args.progress) as prog:
+        if args.gensuperpixels:
+            createSuperpixels(
+                gc, args.images, args.annotationName, args.radius,
+                args.magnification, args.annotationDir, args.numWorkers, prog)
 
-    features = createFeatures(
-        gc, args.images, args.annotationName, args.features, args.patchSize,
-        args.numWorkers)
+        features = createFeatures(
+            gc, args.images, args.annotationName, args.features, args.patchSize,
+            args.numWorkers, prog)
 
-    if args.train:
-        trainModel(
+        if args.train:
+            trainModel(
+                gc, args.images, args.annotationName, features, args.modeldir,
+                args.batchSize, args.epochs, args.split, args.randominput,
+                args.labels, prog)
+
+        predictLabels(
             gc, args.images, args.annotationName, features, args.modeldir,
-            args.batchSize, args.epochs, args.split, args.randominput,
-            args.labels)
-
-    predictLabels(
-        gc, args.images, args.annotationName, features, args.modeldir,
-        args.annotationDir, args.heatmaps, args.radius, args.magnification,
-        args.certainty)
+            args.annotationDir, args.heatmaps, args.radius, args.magnification,
+            args.certainty, args.batchSize, prog)
 
 
 if __name__ == '__main__':
