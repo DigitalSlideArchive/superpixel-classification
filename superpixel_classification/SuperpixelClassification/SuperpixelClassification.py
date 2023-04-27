@@ -59,6 +59,12 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
                              annotationFolderId, userId, prog):
     from histomicstk.cli.SuperpixelSegmentation import SuperpixelSegmentation
 
+    def progCallback(step, count, total):
+        if step == 'tiles':
+            prog.item_progress(item, 0.05 + 0.8 * (count / total))
+        else:
+            prog.item_progress(item, 0.85 + 0.05 * (count / total))
+
     with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
         print('Create superpixels for %s' % item['name'])
         imagePath = os.path.join(tempdir, item['name'])
@@ -88,6 +94,7 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
             default_category_label='default',
             default_fillColor='rgba(0, 0, 0, 0)',
             default_strokeColor='rgba(0, 0, 0, 1)',
+            callback=progCallback,
         )
         print(spopts)
 
@@ -95,6 +102,7 @@ def createSuperpixelsForItem(gc, annotationName, item, radius, magnification,
         # TODO: add a progress callback to the createSuperPixels method so
         # we get more granular progress (requires a change in HistomicsTK).
         SuperpixelSegmentation.createSuperPixels(spopts)
+        del spopts.callback
         prog.item_progress(item, 0.9)
         outImageFile = gc.uploadFileToFolder(annotationFolderId, outImagePath)
         outImageId = outImageFile['itemId']
