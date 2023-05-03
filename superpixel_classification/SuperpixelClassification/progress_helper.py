@@ -1,5 +1,6 @@
 import sys
 import time
+from xml.sax.saxutils import escape
 
 
 class ProgressHelper(object):
@@ -19,15 +20,10 @@ class ProgressHelper(object):
             print("""<filter-start>
 <filter-name>%s</filter-name>
 <filter-comment>%s</filter-comment>
-</filter-start>""" % (self._escape(self._name), self._escape(self._comment)))
+</filter-start>""" % (escape(self._name), escape(self._comment)))
             sys.stdout.flush()
         self._start = time.time()
         return self
-
-    def _escape(self, val):
-        val = str(val).replace('&', '&amp;').replace('<', '&lt;').replace(
-            '>', '&gt;').replace('"', '&quot;').replace("'", '&apos;')
-        return val
 
     def items(self, items):
         self._items = items
@@ -45,20 +41,20 @@ class ProgressHelper(object):
 
     def progress(self, val):
         if self._report and (val == 0 or val == 1 or time.time() - self._last >= 0.1):
-            print("""<filter-progress>%s</filter-progress>""" % self._escape(val))
+            print("""<filter-progress>%s</filter-progress>""" % val)
             sys.stdout.flush()
             self._last = time.time()
 
     def message(self, comment):
         self._comment = comment
         if self._report:
-            print("""<filter-comment>%s</filter-comment>""" % self._escape(comment))
+            print("""<filter-comment>%s</filter-comment>""" % escape(comment))
             sys.stdout.flush()
 
     def name(self, name):
         # Leave the original name alone
         if self._report:
-            print("""<filter-name>%s</filter-name>""" % self._escape(name))
+            print("""<filter-name>%s</filter-name>""" % escape(name))
             sys.stdout.flush()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -68,7 +64,7 @@ class ProgressHelper(object):
             print("""<filter-end>
  <filter-name>%s</filter-name>
  <filter-time>%s</filter-time>
-</filter-end>""" % (self._escape(self._name), self._escape(duration)))
+</filter-end>""" % (escape(self._name), duration))
             sys.stdout.flush()
 
 
