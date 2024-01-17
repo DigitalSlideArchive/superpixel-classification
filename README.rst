@@ -3,7 +3,7 @@ Superpixel Classification
 
 This can be built like so::
 
-    docker build --force-rm -t dsarchive/superpixel . 
+    docker build --force-rm -t dsarchive/superpixel .
 
 To run it from the command line, you'll need to specify some parameters, notably for girder client and for various folders::
 
@@ -56,7 +56,3 @@ Future
 ------
 
 This should be refactored to use classes to make it easy to abstract the base process.  Specifically, this (1) selects image regions, (2) creates feature vectors per region, (3) trains a model using those features and some labels, (4) predicts labels based on that model.
-
-
-
-

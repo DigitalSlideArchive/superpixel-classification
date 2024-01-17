@@ -173,7 +173,7 @@ def createFeaturesForItem(gc, item, elem, featureFolderId, fileName,
                     left=int(bbox[0]), top=int(bbox[1]),
                     right=int(bbox[2]), bottom=int(bbox[3]),
                     width=patchSize, height=patchSize, fill='#000',
-                    encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL)
+                    encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL),
                 ), jsonResp=False).content)
                 if patch.shape[2] in (2, 4):
                     patch = patch[:, :, :-1]
@@ -187,7 +187,7 @@ def createFeaturesForItem(gc, item, elem, featureFolderId, fileName,
                         left=int(bbox[0] / scale), top=int(bbox[1] / scale),
                         right=int(bbox[2] / scale), bottom=int(bbox[3] / scale),
                         width=patchSize, height=patchSize, fill='#000',
-                        encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL)
+                        encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL),
                     ), jsonResp=False).content)
                 if mask.shape[2] == 4:
                     mask = mask[:, :, :-1]
@@ -299,7 +299,7 @@ def trainModelAddItem(gc, record, item, annotrec, elem, feature, randomInput,
 
 class logProgress(tf.keras.callbacks.Callback):
     def __init__(self, prog, total, start=0, width=1, item=None):
-        """Pass a porgress class and the total number of total"""
+        """Pass a progress class and the total number of total"""
         self.prog = prog
         self.total = total
         self.start = start
@@ -371,7 +371,7 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
             # make model
             num_classes = len(record['labels'])
             model = tf.keras.Sequential([
-                tf.keras.layers.Rescaling(1./255),
+                tf.keras.layers.Rescaling(1. / 255),
                 tf.keras.layers.Conv2D(16, 3, padding='same', activation='relu'),
                 tf.keras.layers.MaxPooling2D(),
                 tf.keras.layers.Conv2D(32, 3, padding='same', activation='relu'),
@@ -381,7 +381,7 @@ def trainModel(gc, folderId, annotationName, features, modelFolderId,
                 tf.keras.layers.Flatten(),
                 # tf.keras.layers.Dropout(0.2),
                 tf.keras.layers.Dense(128, activation='relu'),
-                tf.keras.layers.Dense(num_classes)
+                tf.keras.layers.Dense(num_classes),
             ])
             prog.progress(0.4)
             model.compile(
@@ -432,7 +432,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
     compCertainty = al_bench.factory.ComputeCertainty(
         certainty,
         (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50),
-        (0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999)
+        (0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999),
     )
 
     with h5py.File(featurePath, 'r') as ffptr:
