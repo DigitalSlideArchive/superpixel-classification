@@ -8,4 +8,3 @@ if [[ -f "$POSSIBLE_PATH" ]]; then
 else
     python -m slicer_cli_web.cli_list_entrypoint "$@"
 fi
-
