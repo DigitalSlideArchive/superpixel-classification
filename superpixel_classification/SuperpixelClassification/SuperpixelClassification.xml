@@ -154,6 +154,7 @@
       <element>confidence</element>
       <element>margin</element>
       <element>negative_entropy</element>
+      <element>batchbald</element>
     </string-enumeration>
   </parameters>
   <parameters advanced="true">
