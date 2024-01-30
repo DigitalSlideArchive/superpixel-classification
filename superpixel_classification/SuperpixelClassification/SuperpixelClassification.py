@@ -432,7 +432,7 @@ def predictLabelsForItem(gc, annotationName, annotationFolderId, tempdir,
     compCertainty = al_bench.factory.ComputeCertainty(
         certainty,
         (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50),
-        (0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999),
+        [0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999],
     )
 
     with h5py.File(featurePath, 'r') as ffptr:
