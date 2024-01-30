@@ -20,5 +20,5 @@ dependencies = [
     "histomicstk",
     "keras",
     "tensorflow",
-    "al_bench@git+https://github.com/Leengit/ALBench.git",
+    "al_bench@git+https://github.com/DigitalSlideArchive/ALBench.git",
 ]
