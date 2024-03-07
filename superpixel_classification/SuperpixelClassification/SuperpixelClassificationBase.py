@@ -17,6 +17,50 @@ import numpy as np
 from progress_helper import ProgressHelper
 
 
+def summary_repr(contents):
+    """
+    Like Python `repr`, returns a string representing the contents.  However, numpy
+    arrays are summarized as their shape and unknown types are summarized by their type.
+
+    Parameters
+    ----------
+    contents :
+        Python object
+
+    Returns
+    -------
+    A string representation of a summary of the object
+
+    """
+    if isinstance(contents, list):
+        return '[' + ', '.join([summary_repr(elem) for elem in contents]) + ']'
+    elif isinstance(contents, tuple):
+        if len(contents) == 1:
+            return '(' + summary_repr(contents[0]) + ',)'
+        else:
+            return '(' + ', '.join([summary_repr(elem) for elem in contents]) + ')'
+    elif isinstance(contents, dict):
+        return (
+            '{' + ', '.join(
+                [
+                    summary_repr(key) + ': ' + summary_repr(value)
+                    for (key, value) in contents.items()
+                ],
+            ) + '}'
+        )
+    elif isinstance(contents, set):
+        if len(contents) == 0:
+            return repr(set())
+        else:
+            return '{' + ', '.join([summary_repr(elem) for elem in contents]) + '}'
+    elif isinstance(contents, (int, float, np.float32, np.float64, bool, str)):
+        return repr(contents)
+    elif isinstance(contents, np.ndarray):
+        return repr(type(contents)) + '.shape=' + summary_repr(contents.shape)
+    else:
+        return repr(type(contents))
+
+
 class SuperpixelClassificationBase:
     def getItemsAndAnnotations(self, gc, folderId, annotationName, missing=False):
         results = []
