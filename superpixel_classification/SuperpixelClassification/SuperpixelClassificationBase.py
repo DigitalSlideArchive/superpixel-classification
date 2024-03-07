@@ -196,21 +196,33 @@ class SuperpixelClassificationBase:
         return results
 
     def createFeaturesForItem(self, gc, item, elem, featureFolderId, fileName, patchSize, prog):
+        import large_image
+
         print('Create feature', fileName)
         lastlog = starttime = time.time()
         ds = None
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
             filePath = os.path.join(tempdir, fileName)
+            imagePath = os.path.join(tempdir, item['name'])
+            gc.downloadFile(item['largeImage']['fileId'], imagePath)
+            ts = large_image.open(imagePath)
+            maskItem = gc.getItem(elem['girderId'])
+            maskPath = os.path.join(tempdir, maskItem['name'] + '.tiff')
+            gc.downloadFile(maskItem['largeImage']['fileId'], maskPath)
+            tsMask = large_image.open(maskPath)
+
             with h5py.File(filePath, 'w') as fptr:
                 for idx, _ in enumerate(elem['values']):
                     prog.item_progress(item, 0.9 * idx / len(elem['values']))
                     bbox = elem['user']['bbox'][idx * 4: idx * 4 + 4]
                     # use masked superpixel
-                    patch = pickle.loads(gc.get(f'item/{item["_id"]}/tiles/region', parameters=dict(
-                        left=int(bbox[0]), top=int(bbox[1]), right=int(bbox[2]),
-                        bottom=int(bbox[3]), width=patchSize, height=patchSize, fill='#000',
-                        encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL),
-                    ), jsonResp=False).content)
+                    patch = ts.getRegion(
+                        region=dict(
+                            left=int(bbox[0]), top=int(bbox[1]),
+                            right=int(bbox[2]), bottom=int(bbox[3])),
+                        output=dict(maxWidth=patchSize, maxHeight=patchSize),
+                        fill='#000',
+                        format=large_image.constants.TILE_FORMAT_NUMPY)[0]
                     if patch.shape[2] in (2, 4):
                         patch = patch[:, :, :-1]
                     scale = 1
@@ -218,13 +230,13 @@ class SuperpixelClassificationBase:
                         scale = elem['transform']['matrix'][0][0]
                     except Exception:
                         pass
-                    mask = pickle.loads(gc.get(
-                        f'item/{elem["girderId"]}/tiles/region', parameters=dict(
+                    mask = tsMask.getRegion(
+                        region=dict(
                             left=int(bbox[0] / scale), top=int(bbox[1] / scale),
-                            right=int(bbox[2] / scale), bottom=int(bbox[3] / scale),
-                            width=patchSize, height=patchSize, fill='#000',
-                            encoding='pickle:' + str(pickle.HIGHEST_PROTOCOL),
-                        ), jsonResp=False).content)
+                            right=int(bbox[2] / scale), bottom=int(bbox[3] / scale)),
+                        output=dict(maxWidth=patchSize, maxHeight=patchSize),
+                        fill='#000',
+                        format=large_image.constants.TILE_FORMAT_NUMPY)[0]
                     if mask.shape[2] == 4:
                         mask = mask[:, :, :-1]
                     maskvals = [[val % 256, val // 256 % 256, val // 65536 % 256]
