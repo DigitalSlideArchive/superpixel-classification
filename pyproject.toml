@@ -29,4 +29,5 @@ tensorflow = [
 torch = [
     "torch>=1.11,<2.0",
     "batchbald_redux",
+    "torchvision@git+https://github.com/pytorch/vision.git@v0.14.1",
 ]
