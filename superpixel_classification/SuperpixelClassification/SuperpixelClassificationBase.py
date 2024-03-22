@@ -15,6 +15,7 @@ import girder_client
 import h5py
 import numpy as np
 from progress_helper import ProgressHelper
+from tenacity import Retrying, stop_after_attempt
 
 
 def summary_repr(contents):
@@ -62,6 +63,8 @@ def summary_repr(contents):
 
 
 class SuperpixelClassificationBase:
+    uploadRetries = 3
+
     def getItemsAndAnnotations(self, gc, folderId, annotationName, missing=False):
         results = []
         for item in gc.listItem(folderId):
@@ -146,7 +149,9 @@ class SuperpixelClassificationBase:
             SuperpixelSegmentation.createSuperPixels(spopts)
             del spopts.callback
             prog.item_progress(item, 0.9)
-            outImageFile = gc.uploadFileToFolder(annotationFolderId, outImagePath)
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    outImageFile = gc.uploadFileToFolder(annotationFolderId, outImagePath)
             outImageId = outImageFile['itemId']
             annot = json.loads(open(outAnnotationPath).read())
             annot['name'] = '%s Epoch 0' % annotationName
@@ -157,13 +162,15 @@ class SuperpixelClassificationBase:
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(annot, annotation_file, indent=2, sort_keys=False)
             count = len(gc.get('annotation', parameters=dict(itemId=item['_id'])))
-            gc.uploadFileToItem(
-                item['_id'], outAnnotationPath,
-                reference=json.dumps({
-                    'identifier': 'LargeImageAnnotationUpload',
-                    'itemId': item['_id'],
-                    'fileId': item['largeImage']['fileId'],
-                    'userId': userId}))
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    gc.uploadFileToItem(
+                        item['_id'], outAnnotationPath,
+                        reference=json.dumps({
+                            'identifier': 'LargeImageAnnotationUpload',
+                            'itemId': item['_id'],
+                            'fileId': item['largeImage']['fileId'],
+                            'userId': userId}))
             # Wait for the upload to complete
             waittime = time.time()
             while time.time() - waittime < 120:
@@ -262,7 +269,9 @@ class SuperpixelClassificationBase:
                 print(ds.shape, len(elem['values']), '%5.3f' % (time.time() - starttime),
                       item['name'])
             prog.item_progress(item, 0.9)
-            file = gc.uploadFileToFolder(featureFolderId, filePath)
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    file = gc.uploadFileToFolder(featureFolderId, filePath)
             prog.item_progress(item, 1)
             return file
 
@@ -385,7 +394,9 @@ class SuperpixelClassificationBase:
                     mptr.create_dataset('groups', data=np.void(pickle.dumps(record['groups'])))
                     mptr.create_dataset('history', data=np.void(pickle.dumps(history)))
                 prog.progress(1)
-            modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
             print('Saved model')
             return modelFile
 
@@ -438,12 +449,14 @@ class SuperpixelClassificationBase:
             prog.item_progress(item, 0.75)
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(annot, annotation_file, indent=2, sort_keys=False)
-            gc.uploadFileToItem(
-                item['_id'], outAnnotationPath, reference=json.dumps({
-                    'identifier': 'LargeImageAnnotationUpload',
-                    'itemId': item['_id'],
-                    'fileId': item['largeImage']['fileId'],
-                    'userId': userId}))
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    gc.uploadFileToItem(
+                        item['_id'], outAnnotationPath, reference=json.dumps({
+                            'identifier': 'LargeImageAnnotationUpload',
+                            'itemId': item['_id'],
+                            'fileId': item['largeImage']['fileId'],
+                            'userId': userId}))
             prog.item_progress(item, 0.8)
             # Upload new user annotation
             newAnnot = annotrec.copy()
@@ -452,12 +465,14 @@ class SuperpixelClassificationBase:
             outAnnotationPath = os.path.join(tempdir, '%s.anot' % newAnnot['name'])
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(newAnnot, annotation_file, indent=2, sort_keys=False)
-            gc.uploadFileToItem(
-                item['_id'], outAnnotationPath, reference=json.dumps({
-                    'identifier': 'LargeImageAnnotationUpload',
-                    'itemId': item['_id'],
-                    'fileId': item['largeImage']['fileId'],
-                    'userId': userId}))
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    gc.uploadFileToItem(
+                        item['_id'], outAnnotationPath, reference=json.dumps({
+                            'identifier': 'LargeImageAnnotationUpload',
+                            'itemId': item['_id'],
+                            'fileId': item['largeImage']['fileId'],
+                            'userId': userId}))
             prog.item_progress(item, 0.85)
             if makeHeatmaps:
                 self.makeHeatmapsForItem(
@@ -539,13 +554,15 @@ class SuperpixelClassificationBase:
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % heatmaps[-1]['name'])
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(heatmaps, annotation_file, indent=2, sort_keys=False)
-        gc.uploadFileToItem(
-            item['_id'],
-            outAnnotationPath,
-            reference=json.dumps({'identifier': 'LargeImageAnnotationUpload',
-                                  'itemId': item['_id'],
-                                  'fileId': item['largeImage']['fileId'],
-                                  'userId': userId}))
+        for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            with attempt:
+                gc.uploadFileToItem(
+                    item['_id'],
+                    outAnnotationPath,
+                    reference=json.dumps({'identifier': 'LargeImageAnnotationUpload',
+                                          'itemId': item['_id'],
+                                          'fileId': item['largeImage']['fileId'],
+                                          'userId': userId}))
 
     def predictLabels(self, gc, folderId, annotationName, features, modelFolderId,
                       annotationFolderId, saliencyMaps, radius, magnification,
