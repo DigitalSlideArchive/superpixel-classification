@@ -18,6 +18,7 @@ dependencies = [
     "girder-slicer-cli-web",
     "h5py",
     "histomicstk",
+    "tenacity",
     "al_bench@git+https://github.com/DigitalSlideArchive/ALBench.git",
 ]
 
