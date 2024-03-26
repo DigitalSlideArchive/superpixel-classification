@@ -392,7 +392,10 @@ class SuperpixelClassificationBase:
                 with h5py.File(modelPath, 'r+') as mptr:
                     mptr.create_dataset('labels', data=np.void(pickle.dumps(record['labels'])))
                     mptr.create_dataset('groups', data=np.void(pickle.dumps(record['groups'])))
-                    mptr.create_dataset('history', data=np.void(pickle.dumps(history)))
+                    try:
+                        mptr.create_dataset('history', data=np.void(pickle.dumps(history)))
+                    except AttributeError as exc:
+                        print(f'Cannot pickle history; skipping.  {exc}')
                 prog.progress(1)
             for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
                 with attempt:
