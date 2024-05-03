@@ -14,9 +14,8 @@ import time
 import girder_client
 import h5py
 import numpy as np
-from tenacity import Retrying, stop_after_attempt
-
 from progress_helper import ProgressHelper
+from tenacity import Retrying, stop_after_attempt
 
 
 def summary_repr(contents, collapseSequences=False):
@@ -46,63 +45,63 @@ def summary_repr(contents, collapseSequences=False):
     if isinstance(contents, list):
         if collapseSequences and len(contents) > 1:
             return (
-                '['
-                + summary_repr(contents[0], collapseSequences)
-                + f", 'and {len(contents) - 1} more'"
-                + ']'
+                '[' +
+                summary_repr(contents[0], collapseSequences) +
+                f", 'and {len(contents) - 1} more'" +
+                ']'
             )
         return (
-            '['
-            + ', '.join([summary_repr(elem, collapseSequences) for elem in contents])
-            + ']'
+            '[' +
+            ', '.join([summary_repr(elem, collapseSequences) for elem in contents]) +
+            ']'
         )
     if isinstance(contents, tuple):
         if collapseSequences and len(contents) > 1:
             return (
-                '('
-                + summary_repr(contents[0], collapseSequences)
-                + f", 'and {len(contents) - 1} more'"
-                + ',)'
+                '(' +
+                summary_repr(contents[0], collapseSequences) +
+                f", 'and {len(contents) - 1} more'" +
+                ',)'
             )
         return (
-            '('
-            + ', '.join([summary_repr(elem, collapseSequences) for elem in contents])
-            + ',)'
+            '(' +
+            ', '.join([summary_repr(elem, collapseSequences) for elem in contents]) +
+            ',)'
         )
     if isinstance(contents, dict):
         return (
-            '{'
-            + ', '.join(
+            '{' +
+            ', '.join(
                 [
-                    summary_repr(key, collapseSequences)
-                    + ': '
-                    + summary_repr(value, collapseSequences)
+                    summary_repr(key, collapseSequences) +
+                    ': ' +
+                    summary_repr(value, collapseSequences)
                     for key, value in contents.items()
                 ],
-            )
-            + '}'
+            ) +
+            '}'
         )
     if isinstance(contents, set):
         if collapseSequences and len(contents) > 1:
             return (
-                '{'
-                + summary_repr(next(iter(contents)), collapseSequences)
-                + f", 'and {len(contents) - 1} more'"
-                + '}'
+                '{' +
+                summary_repr(next(iter(contents)), collapseSequences) +
+                f", 'and {len(contents) - 1} more'" +
+                '}'
             )
         return (
-            '{'
-            + ', '.join([summary_repr(elem, collapseSequences) for elem in contents])
-            + '}'
+            '{' +
+            ', '.join([summary_repr(elem, collapseSequences) for elem in contents]) +
+            '}'
         )
     if isinstance(contents, np.ndarray):
         return (
-            repr(type(contents))
-            + '(shape='
-            + repr(contents.shape)
-            + ', dtype=np.'
-            + repr(contents.dtype)
-            + ')'
+            repr(type(contents)) +
+            '(shape=' +
+            repr(contents.shape) +
+            ', dtype=np.' +
+            repr(contents.dtype) +
+            ')'
         )
     return repr(type(contents))
 
@@ -197,7 +196,8 @@ class SuperpixelClassificationBase:
 
     def createSuperpixelsForItem(self, gc, annotationName, item, radius, magnification,
                                  annotationFolderId, userId, prog):
-        from histomicstk.cli.SuperpixelSegmentation import SuperpixelSegmentation
+        from histomicstk.cli.SuperpixelSegmentation import \
+            SuperpixelSegmentation
 
         def progCallback(step, count, total):
             if step == 'tiles':

@@ -4,7 +4,6 @@ import batchbald_redux as bbald
 import batchbald_redux.consistent_mc_dropout
 import numpy as np
 import torch
-
 from SuperpixelClassificationBase import SuperpixelClassificationBase
 
 
