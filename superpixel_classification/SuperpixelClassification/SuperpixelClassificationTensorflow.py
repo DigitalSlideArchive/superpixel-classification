@@ -1,7 +1,7 @@
 import os
 
-import numpy as np
 import tensorflow as tf
+
 from SuperpixelClassificationBase import SuperpixelClassificationBase
 
 
@@ -76,15 +76,16 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         return history, modelPath
 
     def predictLabelsForItemDetails(self, batchSize, ds, item, model, prog):
+        # TODO: !!! Should we create a tf.data.Dataset.from_tensor_slices from ds, then
+        # invoke .batch(bathSize), and then give to model.predict()?  Otherwise,
+        # batchSize seems to be ignored.
         predictions = model.predict(
             ds, callbacks=[_LogTensorflowProgress(
                 prog, (ds.shape[0] + batchSize - 1) // batchSize, 0.05, 0.35, item)])
         prog.item_progress(item, 0.4)
-        # scale to units
-        cats = [np.argmax(r) for r in predictions]
         # softmax to scale to 0 to 1
         catWeights = tf.nn.softmax(predictions)
-        return cats, catWeights, predictions
+        return catWeights, predictions
 
     def loadModel(self, modelPath):
         return tf.keras.models.load_model(modelPath)

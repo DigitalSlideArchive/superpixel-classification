@@ -14,11 +14,12 @@ import time
 import girder_client
 import h5py
 import numpy as np
-from progress_helper import ProgressHelper
 from tenacity import Retrying, stop_after_attempt
 
+from progress_helper import ProgressHelper
 
-def summary_repr(contents):
+
+def summary_repr(contents, collapseSequences=False):
     """
     Like Python `repr`, returns a string representing the contents.  However, numpy
     arrays are summarized as their shape and unknown types are summarized by their type.
@@ -27,39 +28,134 @@ def summary_repr(contents):
     ----------
     contents :
         Python object
+    collapseSequences :
+        Set to True to summarize only the first of any list, tuple, or set that has
+        length longer than one.  In contrast, a dict will be presented in full.
 
     Returns
     -------
     A string representation of a summary of the object
 
     """
-    if isinstance(contents, list):
-        return '[' + ', '.join([summary_repr(elem) for elem in contents]) + ']'
-    elif isinstance(contents, tuple):
-        if len(contents) == 1:
-            return '(' + summary_repr(contents[0]) + ',)'
-        else:
-            return '(' + ', '.join([summary_repr(elem) for elem in contents]) + ')'
-    elif isinstance(contents, dict):
-        return (
-            '{' + ', '.join(
-                [
-                    summary_repr(key) + ': ' + summary_repr(value)
-                    for (key, value) in contents.items()
-                ],
-            ) + '}'
-        )
-    elif isinstance(contents, set):
-        if len(contents) == 0:
-            return repr(set())
-        else:
-            return '{' + ', '.join([summary_repr(elem) for elem in contents]) + '}'
-    elif isinstance(contents, (int, float, np.float32, np.float64, bool, str)):
+    if isinstance(
+        contents, (bool, int, float, str, np.int32, np.int64, np.float32, np.float64),
+    ):
         return repr(contents)
-    elif isinstance(contents, np.ndarray):
-        return repr(type(contents)) + '.shape=' + summary_repr(contents.shape)
-    else:
-        return repr(type(contents))
+    if isinstance(contents, (list, tuple, dict, set)) and len(contents) == 0:
+        return repr(type(contents)())
+    if isinstance(contents, list):
+        if collapseSequences and len(contents) > 1:
+            return (
+                '['
+                + summary_repr(contents[0], collapseSequences)
+                + f", 'and {len(contents) - 1} more'"
+                + ']'
+            )
+        return (
+            '['
+            + ', '.join([summary_repr(elem, collapseSequences) for elem in contents])
+            + ']'
+        )
+    if isinstance(contents, tuple):
+        if collapseSequences and len(contents) > 1:
+            return (
+                '('
+                + summary_repr(contents[0], collapseSequences)
+                + f", 'and {len(contents) - 1} more'"
+                + ',)'
+            )
+        return (
+            '('
+            + ', '.join([summary_repr(elem, collapseSequences) for elem in contents])
+            + ',)'
+        )
+    if isinstance(contents, dict):
+        return (
+            '{'
+            + ', '.join(
+                [
+                    summary_repr(key, collapseSequences)
+                    + ': '
+                    + summary_repr(value, collapseSequences)
+                    for key, value in contents.items()
+                ],
+            )
+            + '}'
+        )
+    if isinstance(contents, set):
+        if collapseSequences and len(contents) > 1:
+            return (
+                '{'
+                + summary_repr(next(iter(contents)), collapseSequences)
+                + f", 'and {len(contents) - 1} more'"
+                + '}'
+            )
+        return (
+            '{'
+            + ', '.join([summary_repr(elem, collapseSequences) for elem in contents])
+            + '}'
+        )
+    if isinstance(contents, np.ndarray):
+        return (
+            repr(type(contents))
+            + '(shape='
+            + repr(contents.shape)
+            + ', dtype=np.'
+            + repr(contents.dtype)
+            + ')'
+        )
+    return repr(type(contents))
+
+
+def print_fully(name, contents):
+    pass
+    # saved_threshold = np.get_printoptions()['threshold']
+    # np.set_printoptions(threshold=9223372036854775807)
+    # print(f'{name} = {summary_repr(contents, True)}')
+    # print(f'{name} = ')
+    # print(repr(contents))
+    # np.set_printoptions(threshold=saved_threshold)
+
+
+def find_first_numpy_type(contents):
+    response = {
+        np.int32: 'numpy.int32',
+        np.int64: 'numpy.int64',
+        np.float32: 'numpy.float32',
+        np.float64: 'numpy.float64',
+    }
+    if isinstance(contents, (int, float, bool, str)):
+        return ''
+    if isinstance(contents, (np.int32, np.int64, np.float32, np.float64)):
+        return ' is a ' + response[type(contents)]
+    if isinstance(contents, (tuple, list, np.ndarray)):
+        for i, e in enumerate(contents):
+            r = find_first_numpy_type(e)
+            if r != '':
+                return f'[{i}]' + r
+        return ''
+    if isinstance(contents, dict):
+        for i, (k, v) in enumerate(contents.items()):
+            r = find_first_numpy_type(k)
+            if r != '':
+                return f'.keys()[{i}]' + r
+            r = find_first_numpy_type(v)
+            if r != '':
+                return f'[{k!r}]' + r
+        return ''
+    if isinstance(contents, set):
+        for i, k in enumerate(contents):
+            r = find_first_numpy_type(k)
+            if r != '':
+                return f'.keys()[{i}]' + r
+        return ''
+    return ' is not a recognized type'
+
+
+def check_for_numpy(name, contents):
+    found_string = find_first_numpy_type(contents)
+    if found_string != '':
+        print(f'{name}{found_string}')
 
 
 class SuperpixelClassificationBase:
@@ -101,8 +197,7 @@ class SuperpixelClassificationBase:
 
     def createSuperpixelsForItem(self, gc, annotationName, item, radius, magnification,
                                  annotationFolderId, userId, prog):
-        from histomicstk.cli.SuperpixelSegmentation import \
-            SuperpixelSegmentation
+        from histomicstk.cli.SuperpixelSegmentation import SuperpixelSegmentation
 
         def progCallback(step, count, total):
             if step == 'tiles':
@@ -159,6 +254,8 @@ class SuperpixelClassificationBase:
             print('Bounding boxes span to',
                   max(annot['elements'][0]['user']['bbox'][2::4]),
                   max(annot['elements'][0]['user']['bbox'][3::4]))
+            check_for_numpy('annot', annot)
+            print_fully('annot', annot)
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(annot, annotation_file, indent=2, sort_keys=False)
             count = len(gc.get('annotation', parameters=dict(itemId=item['_id'])))
@@ -376,7 +473,7 @@ class SuperpixelClassificationBase:
                                            features.get(item['_id']), randomInput, labelList)
                 prog.progress(1)
                 if not record['ds']:
-                    print('No labelled data')
+                    print('No labeled data')
                     return
                 record['labelds'] = fptr.create_dataset(
                     'labels', (len(record['labelvals']),), dtype=int)
@@ -388,12 +485,14 @@ class SuperpixelClassificationBase:
                 history, modelPath = self.trainModelDetails(
                     record, annotationName, batchSize, epochs, itemsAndAnnot, prog, tempdir,
                     trainingSplit)
-                print(repr(record['labels']), repr(record['groups']))
-                with h5py.File(modelPath, 'r+') as mptr:
-                    mptr.create_dataset('labels', data=np.void(pickle.dumps(record['labels'])))
-                    mptr.create_dataset('groups', data=np.void(pickle.dumps(record['groups'])))
+
+                modTrainingPath = os.path.join(tempdir, '%s ModTraining Epoch %d.h5' % (
+                    annotationName, self.getCurrentEpoch(itemsAndAnnot)))
+                with h5py.File(modTrainingPath, 'w') as mtptr:
+                    mtptr.create_dataset('labels', data=np.void(pickle.dumps(record['labels'])))
+                    mtptr.create_dataset('groups', data=np.void(pickle.dumps(record['groups'])))
                     try:
-                        mptr.create_dataset('history', data=np.void(pickle.dumps(history)))
+                        mtptr.create_dataset('history', data=np.void(pickle.dumps(history)))
                     except AttributeError as exc:
                         print(f'Cannot pickle history; skipping.  {exc}')
                 prog.progress(1)
@@ -401,7 +500,11 @@ class SuperpixelClassificationBase:
                 with attempt:
                     modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
             print('Saved model')
-            return modelFile
+            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+                with attempt:
+                    modTrainingFile = gc.uploadFileToFolder(modelFolderId, modTrainingPath)
+            print('Saved modTraining')
+            return modelFile, modTrainingFile
 
     def predictLabelsForItem(self, gc, annotationName, annotationFolderId, tempdir, model, item,
                              annotrec, elem, feature, curEpoch, userId, labels, groups,
@@ -414,10 +517,14 @@ class SuperpixelClassificationBase:
         annotrec = annotrec['annotation']
         annotrec['elements'] = [elem]
 
+        print(f'certainty_type = {certainty!r}')
         compCertainty = al_bench.factory.ComputeCertainty(
-            certainty,
-            (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50),
-            (0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999))
+            certainty_type=certainty,
+            percentiles=(0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50),
+            cutoffs=(0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.995, 0.9975, 0.999))
+        # In case we are computing batchbald
+        compCertainty.set_batchbald_num_samples(16)
+        compCertainty.set_batchbald_batch_size(100)
 
         with h5py.File(featurePath, 'r') as ffptr:
             prog.item_progress(item, 0)
@@ -426,30 +533,54 @@ class SuperpixelClassificationBase:
             annot['elements'][0].pop('id', None)
             annot['name'] = '%s Epoch %d Predictions' % (annotationName, curEpoch)
             annot['elements'][0]['categories'] = [groups[key] for key in labels]
-            values = annot['elements'][0]['values']
-            conf = annot['elements'][0]['user']['confidence'] = []
-            catConf = annot['elements'][0]['user']['categoryConfidence'] = []
             ds = ffptr['images']
             prog.item_progress(item, 0.05)
-            cats, catWeights, predictions = self.predictLabelsForItemDetails(
+            catWeights, predictions = self.predictLabelsForItemDetails(
                 batchSize, ds, item, model, prog)
-            certInputs = []
-            for eidx, entry in enumerate(predictions):
-                if not eidx % batchSize:
-                    prog.item_progress(item, 0.4 + 0.35 * eidx / len(predictions))
-                values[len(conf)] = int(cats[eidx])
-                catConf.append([float(v) for v in entry])
-                certInputs.append([float(v) for v in catWeights[eidx]])
-                conf.append(float(catWeights[eidx][cats[eidx]]))
+            catWeights = np.array(catWeights)
+            predictions = np.array(predictions)
+            print_fully('predictions', predictions)
             prog.item_progress(item, 0.7)
-            cert = compCertainty.from_numpy_array(np.array(certInputs))
-            annot['elements'][0]['user']['certainty'] = list(cert[certainty]['scores'])
+            # compCertainty needs catWeights to have shape (num_superpixels,
+            # bayesian_samples, num_classes) if 'batchbald' is selected, otherwise the
+            # shape should be (num_superpixels, num_classes).
+            print_fully('catWeights', catWeights)
+            cert = compCertainty.from_numpy_array(catWeights)
+            # After the call to compCertainty, those numbers that end up as values for
+            # annot's keys 'values', 'confidence', 'categoryConfidence', and 'certainty'
+            # should have shape (num_superpixels, num_classes).
+            print_fully('cert', cert)
+            scores = cert[certainty]['scores']
+            print_fully('scores', scores)
+            if len(catWeights.shape) == 3:
+                # Average over the Bayesian samples
+                scores = scores.mean(axis=1)
+                catWeights = catWeights.mean(axis=1)
+                epsilon = 1e-50
+                predictions = np.log(catWeights + epsilon)
+            cats = np.argmax(catWeights, axis=-1)
+            indices = np.arange(cats.shape[0])
+            conf = catWeights[indices, cats[indices]]
+            print_fully('cats', cats)
+            print_fully('conf', conf)
+
+            cats = cats.tolist()
+            conf = conf.tolist()
+            # Should this be from predictions for from catWeights?!!!
+            catConf = predictions.tolist()
+            scores = scores.tolist()
+            annot['elements'][0]['values'] = cats
+            annot['elements'][0]['user']['confidence'] = conf
+            annot['elements'][0]['user']['categoryConfidence'] = catConf
+            annot['elements'][0]['user']['certainty'] = scores
             annot['elements'][0]['user']['certainty_info'] = {
                 'type': certainty,
                 'percentiles': cert[certainty]['percentiles'],
                 'cdf': cert[certainty]['cdf']}
             outAnnotationPath = os.path.join(tempdir, '%s.anot' % annot['name'])
             prog.item_progress(item, 0.75)
+            check_for_numpy('annot', annot)
+            print_fully('annot', annot)
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(annot, annotation_file, indent=2, sort_keys=False)
             for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
@@ -466,6 +597,8 @@ class SuperpixelClassificationBase:
             newAnnot['elements'][0].pop('id', None)
             newAnnot['name'] = '%s Epoch %d' % (annotationName, curEpoch + 1)
             outAnnotationPath = os.path.join(tempdir, '%s.anot' % newAnnot['name'])
+            check_for_numpy('newAnnot', newAnnot)
+            print_fully('newAnnot', newAnnot)
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(newAnnot, annotation_file, indent=2, sort_keys=False)
             for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
@@ -535,7 +668,8 @@ class SuperpixelClassificationBase:
                     'normalizeRange': False}]})
 
         uncert = np.array(conf)
-        uncert = list(1 - (uncert - np.amin(uncert)) / ((np.amax(uncert) - np.amin(uncert)) or 1))
+        uncert = 1 - (uncert - np.amin(uncert)) / ((np.amax(uncert) - np.amin(uncert)) or 1)
+        uncert = uncert.tolist()
         heatmaps.append({
             'name': 'Uncertainty Epoch %d' % (curEpoch),
             'description': 'Uncertainty for %s Epoch %d' % (annotationName, curEpoch),
@@ -555,6 +689,8 @@ class SuperpixelClassificationBase:
                 'rangeValues': [0, 0.5, 0.75, 1],
                 'normalizeRange': False}]})
         outAnnotationPath = os.path.join(tempdir, '%s.anot' % heatmaps[-1]['name'])
+        check_for_numpy('heatmaps', heatmaps)
+        print_fully('heatmaps', heatmaps)
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(heatmaps, annotation_file, indent=2, sort_keys=False)
         for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
@@ -579,7 +715,8 @@ class SuperpixelClassificationBase:
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
             modelFile = None
             for item in gc.listResource(
-                    'item', {'folderId': modelFolderId, 'sort': 'updated', 'sortdir': -1}):
+                'item', {'folderId': modelFolderId, 'sort': 'updated', 'sortdir': -1},
+            ):
                 if annotationName in item['name'] and 'model' in item['name'].lower():
                     modelFile = next(gc.listFile(item['_id'], limit=1))
                     break
@@ -589,10 +726,24 @@ class SuperpixelClassificationBase:
             print(modelFile['name'], item)
             modelPath = os.path.join(tempdir, modelFile['name'])
             gc.downloadFile(modelFile['_id'], modelPath)
+
+            modTrainingFile = None
+            for item in gc.listResource(
+                    'item', {'folderId': modelFolderId, 'sort': 'updated', 'sortdir': -1}):
+                if annotationName in item['name'] and 'modtraining' in item['name'].lower():
+                    modTrainingFile = next(gc.listFile(item['_id'], limit=1))
+                    break
+            if not modTrainingFile:
+                print('No modTraining file found')
+                return
+            print(modTrainingFile['name'], item)
+            modTrainingPath = os.path.join(tempdir, modTrainingFile['name'])
+            gc.downloadFile(modTrainingFile['_id'], modTrainingPath)
+
             model = self.loadModel(modelPath)
-            with h5py.File(modelPath, 'r+') as mptr:
-                labels = pickle.loads(mptr['labels'][()].tobytes())
-                groups = pickle.loads(mptr['groups'][()].tobytes())
+            with h5py.File(modTrainingPath, 'r+') as mtptr:
+                labels = pickle.loads(mtptr['labels'][()].tobytes())
+                groups = pickle.loads(mtptr['groups'][()].tobytes())
             for label in labels:
                 if label not in groups:
                     ll = len(groups)
