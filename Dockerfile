@@ -12,14 +12,14 @@ RUN apt-get update && \
 
 COPY . /opt/scw
 WORKDIR /opt/scw
-RUN python -m pip install -e .[tensorflow] --find-links https://girder.github.io/large_image_wheels
+RUN python -m pip install -e .[tensorflow,torch] --find-links https://girder.github.io/large_image_wheels --extra-index-url https://download.pytorch.org/whl/cu117
 
 # Use a newer histomicstk
 # Not needed if we install histomicstk from pypi
 # RUN apt-get update && apt-get install -y git build-essential && \
 #     git clone --depth=1 --single-branch -b master https://github.com/DigitalSlideArchive/HistomicsTK.git && \
 #     cd HistomicsTK && \
-#     pip install .[tensorflow]
+#     pip install .[tensorflow,torch]
 
 WORKDIR /opt/scw/superpixel_classification
 
