@@ -7,12 +7,15 @@ LABEL com.nvidia.volumes.needed=nvidia_driver
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
+    rdfind \
     && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/*
 
 COPY . /opt/scw
 WORKDIR /opt/scw
-RUN python -m pip install -e .[tensorflow,torch] --find-links https://girder.github.io/large_image_wheels --extra-index-url https://download.pytorch.org/whl/cu117
+RUN python -m pip install --no-cache-dir -e .[tensorflow,torch] --find-links https://girder.github.io/large_image_wheels --extra-index-url https://download.pytorch.org/whl/cu117 && \
+    rm -rf /root/.cache/pip/* && \
+    rdfind -minsize 32768 -makehardlinks true -makeresultsfile false /usr/local
 
 # Use a newer histomicstk
 # Not needed if we install histomicstk from pypi
