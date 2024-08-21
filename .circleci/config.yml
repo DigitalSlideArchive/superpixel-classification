@@ -1,6 +1,15 @@
 version: 2
 
 jobs:
+  build_docker:
+    working_directory: ~/project
+    machine:
+      image: ubuntu-2004:202111-02
+    steps:
+      - checkout
+      - run:
+          name: Build docker
+          command: docker build --force-rm -t dsarchive/superpixel .
   publish_docker:
     working_directory: ~/project
     machine:
@@ -25,6 +34,13 @@ workflows:
 
   ci:
     jobs:
+      - build_docker:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore:
+                - gh-pages
       - publish_docker:
           filters:
             tags:
