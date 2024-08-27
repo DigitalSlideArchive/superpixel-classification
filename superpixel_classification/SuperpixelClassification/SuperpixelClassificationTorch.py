@@ -1,26 +1,36 @@
 import os
+from typing import Any, Sequence
 
 import batchbald_redux as bbald
 import batchbald_redux.consistent_mc_dropout
 import numpy as np
 import torch
+from numpy.typing import NDArray
+from progress_helper import ProgressHelper
 from SuperpixelClassificationBase import SuperpixelClassificationBase
 
 
 class _LogTorchProgress:
-    def __init__(self, prog, total, start=0, width=1, item=None) -> None:
+    def __init__(
+        self,
+        prog: ProgressHelper,
+        total: int,
+        start: float = 0.0,
+        width: float = 1.0,
+        item=None,
+    ) -> None:
         """Pass a progress class and the total number of total"""
-        self.prog = prog
-        self.total = total
-        self.start = start
-        self.width = width
+        self.prog: ProgressHelper = prog
+        self.total: int = total
+        self.start: float = start
+        self.width: float = width
         self.item = item
 
     def on_epoch_begin(self, epoch, logs=None) -> None:
         pass
 
     def on_epoch_end(self, epoch, logs=None) -> None:
-        val = ((epoch + 1) / self.total) * self.width + self.start
+        val: float = ((epoch + 1) / self.total) * self.width + self.start
         if self.item is None:
             self.prog.progress(val)
         else:
@@ -49,7 +59,7 @@ class _LogTorchProgress:
         pass
 
     def on_predict_batch_end(self, batch, logs=None) -> None:
-        val = ((batch + 1) / self.total) * self.width + self.start
+        val: float = ((batch + 1) / self.total) * self.width + self.start
         if self.item is None:
             self.prog.progress(val)
         else:
@@ -60,7 +70,7 @@ class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
     def __init__(self, num_classes: int) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        self.device = torch.device(
+        self.device: str = torch.device(
             'cuda'
             if torch.cuda.is_available() and torch.cuda.device_count() > 0
             else 'cpu',
@@ -68,15 +78,24 @@ class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
         print(f'Initial model.device = {self.device}')
         super(_BayesianTorchModel, self).__init__()
 
-        self.conv1: torch.Module = torch.nn.Conv2d(3, 16, kernel_size=3, padding=1)
-        self.conv1_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
-        self.conv2: torch.Module = torch.nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.conv2_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
-        self.conv3: torch.Module = torch.nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv3_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
-        self.fc1: torch.Module = torch.nn.Linear(9216, 128)
-        self.fc1_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout()
-        self.fc2: torch.Module = torch.nn.Linear(128, num_classes)
+        self.conv1: torch.Module
+        self.conv1_drop: torch.Module
+        self.conv2: torch.Module
+        self.conv2_drop: torch.Module
+        self.conv3: torch.Module
+        self.conv3_drop: torch.Module
+        self.fc1: torch.Module
+        self.fc1_drop: torch.Module
+        self.fc2: torch.Module
+        self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, padding=1)
+        self.conv1_drop = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
+        self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.conv2_drop = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
+        self.conv3 = torch.nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv3_drop = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
+        self.fc1 = torch.nn.Linear(9216, 128)
+        self.fc1_drop = bbald.consistent_mc_dropout.ConsistentMCDropout()
+        self.fc2 = torch.nn.Linear(128, num_classes)
 
         self.num_classes: int = num_classes
         self.bayesian_samples: int = 12
@@ -114,16 +133,33 @@ class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
 
 
 class SuperpixelClassificationTorch(SuperpixelClassificationBase):
-    def trainModelDetails(self, record, annotationName, batchSize, epochs, itemsAndAnnot, prog,
-                          tempdir, trainingSplit):
+    def trainModelDetails(
+        self,
+        record,
+        annotationName: str,
+        batchSize: int,
+        epochs: int,
+        itemsAndAnnot,
+        prog: ProgressHelper,
+        tempdir: str,
+        trainingSplit: float,
+    ):
         # Make a data set and a data loader for each of training and validation
-        count = len(record['ds'])
+        count: int = len(record['ds'])
         # Split data into training and validation.  H5py requires that indices be
         # sorted.
-        train_size = int(count * trainingSplit)
-        shuffle = np.random.permutation(count)  # TODO: add seed=123?
-        train_indices = np.sort(shuffle[0:train_size])
-        val_indices = np.sort(shuffle[train_size:count])
+        train_size: int = int(count * trainingSplit)
+        shuffle: NDArray[np.int_] = np.random.permutation(count)  # TODO: add seed=123?
+        train_indices: NDArray[np.int_] = np.sort(shuffle[0:train_size])
+        val_indices: NDArray[np.int_] = np.sort(shuffle[train_size:count])
+        train_arg1: torch.Tensor
+        train_arg2: torch.Tensor
+        val_arg1: torch.Tensor
+        val_arg2: torch.Tensor
+        train_ds: torch.utils.data.TensorDataset
+        val_ds: torch.utils.data.TensorDataset
+        train_dl: torch.utils.data.DataLoader
+        val_dl: torch.utils.data.DataLoader
         train_arg1 = torch.from_numpy(record['ds'][train_indices].transpose((0, 3, 2, 1)))
         train_arg2 = torch.from_numpy(record['labelds'][train_indices])
         val_arg1 = torch.from_numpy(record['ds'][val_indices].transpose((0, 3, 2, 1)))
@@ -135,7 +171,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         prog.progress(0.2)
 
         # make model
-        num_classes = len(record['labels'])
+        num_classes: int = len(record['labels'])
         model: torch.nn.Module = _BayesianTorchModel(num_classes)
         model.to(model.device)
         prog.message('Training model')
@@ -147,13 +183,19 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
 
         prog.message('Saving model')
         prog.progress(0)
-        modelPath = os.path.join(tempdir, '%s Model Epoch %d.pth' % (
+        modelPath: str = os.path.join(tempdir, '%s Model Epoch %d.pth' % (
             annotationName, self.getCurrentEpoch(itemsAndAnnot)))
         self.saveModel(model, modelPath)
         return history, modelPath
 
-    def fitModel(self, model: torch.nn.Module, train_dl: torch.utils.data.DataLoader,
-                 val_dl: torch.utils.data.DataLoader, epochs: int, callbacks):
+    def fitModel(
+        self,
+        model: torch.nn.Module,
+        train_dl: torch.utils.data.DataLoader,
+        val_dl: torch.utils.data.DataLoader,
+        epochs: int,
+        callbacks,
+    ) -> Any:
         model.train()  # Tell torch we will be training
         criterion = torch.nn.functional.nll_loss
         optimizer = torch.optim.Adam(model.parameters())
@@ -162,6 +204,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         num_training_samples: int = model.bayesian_samples
         num_validation_samples: int = model.bayesian_samples
         # Loop over the dataset multiple times
+        epoch: int
         for epoch in range(epochs):
             for cb in callbacks:
                 cb.on_epoch_begin(epoch, logs=dict())
@@ -171,6 +214,8 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
             for batch, data in enumerate(train_dl):
                 for cb in callbacks:
                     cb.on_train_batch_begin(batch, logs=dict())
+                inputs: torch.Tensor
+                labels: torch.Tensor
                 inputs, labels = data
                 inputs = inputs.to(model.device)
                 labels = labels.to(model.device)
@@ -250,10 +295,12 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
 
         for cb in callbacks:
             cb.on_train_end(logs)  # `logs` is from the last epoch
-        history = []  # TODO: Perhaps return something meaningful?
+        history: Sequence[Any] = []  # TODO: Perhaps return something meaningful?
         return history
 
-    def predictLabelsForItemDetails(self, batchSize, ds_h5, item, model, prog):
+    def predictLabelsForItemDetails(
+            self, batchSize: int, ds_h5, item, model: torch.nn.Module, prog: ProgressHelper,
+    ):
         num_superpixels: int = ds_h5.shape[0]
         # print(f'{num_superpixels = }')
         bayesian_samples: int = model.bayesian_samples
@@ -271,12 +318,12 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         for cb in callbacks:
             cb.on_predict_begin(logs=logs)
 
-        ds = torch.utils.data.TensorDataset(
+        ds: torch.utils.data.TensorDataset = torch.utils.data.TensorDataset(
             torch.from_numpy(np.array(ds_h5).transpose((0, 3, 2, 1))),
         )
-        dl = torch.utils.data.DataLoader(ds, batch_size=batchSize)
-        predictions = np.zeros((num_superpixels, bayesian_samples, num_classes))
-        catWeights = np.zeros((num_superpixels, bayesian_samples, num_classes))
+        dl: torch.utils.data.DataLoader = torch.utils.data.DataLoader(ds, batch_size=batchSize)
+        predictions: NDArray[np.float_] = np.zeros((num_superpixels, bayesian_samples, num_classes))
+        catWeights: NDArray[np.float_] = np.zeros((num_superpixels, bayesian_samples, num_classes))
         with torch.no_grad():
             model.eval()  # Tell torch that we will be doing predictions
             row: int = 0
