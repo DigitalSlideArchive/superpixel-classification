@@ -58,13 +58,15 @@ class _LogTorchProgress:
 
 class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
     def __init__(self, num_classes: int) -> None:
+        # Set `self.device` as early as possible so that other code does not lock out
+        # what we want.
         self.device = torch.device(
             'cuda'
             if torch.cuda.is_available() and torch.cuda.device_count() > 0
             else 'cpu',
         )
+        print(f'Initial model.device = {self.device}')
         super(_BayesianTorchModel, self).__init__()
-        self.to(self.device)
 
         self.conv1: torch.Module = torch.nn.Conv2d(3, 16, kernel_size=3, padding=1)
         self.conv1_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout2d()
@@ -135,6 +137,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         # make model
         num_classes = len(record['labels'])
         model: torch.nn.Module = _BayesianTorchModel(num_classes)
+        model.to(model.device)
         prog.message('Training model')
         prog.progress(0)
 
@@ -169,6 +172,8 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 for cb in callbacks:
                     cb.on_train_batch_begin(batch, logs=dict())
                 inputs, labels = data
+                inputs = inputs.to(model.device)
+                labels = labels.to(model.device)
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
@@ -216,6 +221,8 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 model.eval()  # Tell torch that we will be doing predictions
                 for data in val_dl:
                     inputs, labels = data
+                    inputs = inputs.to(model.device)
+                    labels = labels.to(model.device)
                     outputs = model(inputs, num_validation_samples)
                     outputs = torch.nn.functional.log_softmax(outputs, dim=-1)
                     # outputs.shape == (batch_size, num_training_samples, num_classes).
@@ -285,6 +292,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                     cb.on_predict_batch_begin(i)
                 inputs = data[0]
                 new_row = row + inputs.shape[0]
+                inputs = inputs.to(model.device)
                 # print(f'inputs[{i}].shape = {inputs.shape}')
                 predictions_raw = model(inputs, bayesian_samples)
                 catWeights_raw = torch.nn.functional.softmax(predictions_raw, dim=-1)
