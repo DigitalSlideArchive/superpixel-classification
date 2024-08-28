@@ -158,9 +158,9 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         criterion = torch.nn.functional.nll_loss
         optimizer = torch.optim.Adam(model.parameters())
 
-        # TODO: What are good values for num_samples here?!!!  Eg., simply 1?
-        num_training_samples: int = 12
-        num_validation_samples: int = 12
+        # TODO: Should training use as many bayesian samples as prediction does?!!!
+        num_training_samples: int = model.bayesian_samples
+        num_validation_samples: int = model.bayesian_samples
         # Loop over the dataset multiple times
         for epoch in range(epochs):
             for cb in callbacks:
@@ -261,13 +261,6 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         num_classes: int = model.num_classes
         # print(f'{num_classes = }')
 
-        # TODO: Stop overriding batchSize!!! We are ignoring the supplied value of
-        # batchSize because that is what SuperpixelClassificationTensorflow is doing.
-        # Instead we should have the calling routine pass in a reasonable value, which
-        # might be distinct from the batch size used during training.
-        batchSize = 1 + (num_superpixels - 1) // bayesian_samples
-        # batchSize = num_superpixels  # This can be too many
-
         callbacks = [_LogTorchProgress(
             prog, 1 + (num_superpixels - 1) // batchSize, 0.05, 0.35, item)]
         logs = dict(
@@ -293,7 +286,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 inputs = data[0]
                 new_row = row + inputs.shape[0]
                 inputs = inputs.to(model.device)
-                # print(f'inputs[{i}].shape = {inputs.shape}')
+                print(f'inputs[{i}].shape = {inputs.shape}')
                 predictions_raw = model(inputs, bayesian_samples)
                 catWeights_raw = torch.nn.functional.softmax(predictions_raw, dim=-1)
                 predictions[row:new_row, :, :] = predictions_raw.detach().cpu().numpy()
