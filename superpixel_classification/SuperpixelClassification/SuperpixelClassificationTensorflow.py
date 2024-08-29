@@ -31,7 +31,7 @@ class _LogTensorflowProgress(tf.keras.callbacks.Callback):
 class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
     def trainModelDetails(self, record, annotationName, batchSize, epochs, itemsAndAnnot, prog,
                           tempdir, trainingSplit):
-        print(f'Tensorflow trainModelDetails(batchSize={batchSize}, ...)')
+        # print(f'Tensorflow trainModelDetails(batchSize={batchSize}, ...)')
         # generate split
         full_ds = tf.data.Dataset.from_tensor_slices((record['ds'], record['labelds']))
         full_ds = full_ds.shuffle(1000)  # add seed=123 ?
@@ -76,7 +76,7 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         return history, modelPath
 
     def predictLabelsForItemDetails(self, batchSize, ds, item, model, prog):
-        print(f'Tensorflow predictLabelsForItemDetails(batchSize={batchSize}, ...)')
+        # print(f'Tensorflow predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         predictions = model.predict(
             ds,
             batch_size=batchSize,

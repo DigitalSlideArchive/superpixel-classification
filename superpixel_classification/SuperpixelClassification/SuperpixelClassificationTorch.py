@@ -75,7 +75,7 @@ class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
             if torch.cuda.is_available() and torch.cuda.device_count() > 0
             else 'cpu',
         )
-        print(f'Initial model.device = {self.device}')
+        # print(f'Initial model.device = {self.device}')
         super(_BayesianTorchModel, self).__init__()
 
         self.conv1: torch.Module
@@ -144,6 +144,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         tempdir: str,
         trainingSplit: float,
     ):
+        # print(f'Torch trainModelDetails(batchSize={batchSize}, ...)')
         # Make a data set and a data loader for each of training and validation
         count: int = len(record['ds'])
         # Split data into training and validation.  H5py requires that indices be
@@ -301,6 +302,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
     def predictLabelsForItemDetails(
             self, batchSize: int, ds_h5, item, model: torch.nn.Module, prog: ProgressHelper,
     ):
+        # print(f'Torch predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         num_superpixels: int = ds_h5.shape[0]
         # print(f'{num_superpixels = }')
         bayesian_samples: int = model.bayesian_samples
@@ -333,7 +335,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 inputs = data[0]
                 new_row = row + inputs.shape[0]
                 inputs = inputs.to(model.device)
-                print(f'inputs[{i}].shape = {inputs.shape}')
+                # print(f'inputs[{i}].shape = {inputs.shape}')
                 predictions_raw = model(inputs, bayesian_samples)
                 catWeights_raw = torch.nn.functional.softmax(predictions_raw, dim=-1)
                 predictions[row:new_row, :, :] = predictions_raw.detach().cpu().numpy()
