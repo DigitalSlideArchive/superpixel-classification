@@ -14,6 +14,7 @@ import time
 import girder_client
 import h5py
 import numpy as np
+from numpy.typing import NDArray
 from progress_helper import ProgressHelper
 from tenacity import Retrying, stop_after_attempt
 
@@ -517,6 +518,10 @@ class SuperpixelClassificationBase:
         annotrec = annotrec['annotation']
         annotrec['elements'] = [elem]
 
+        # Figure out which samples are already labeled
+        labeled_samples: NDArray[np.int_] = np.nonzero(np.array(elem['values']))
+
+        print(f'{labeled_samples = }')
         print(f'certainty_type = {certainty!r}')
         compCertainty = al_bench.factory.ComputeCertainty(
             certainty_type=certainty,
@@ -525,6 +530,7 @@ class SuperpixelClassificationBase:
         # In case we are computing batchbald
         compCertainty.set_batchbald_num_samples(16)
         compCertainty.set_batchbald_batch_size(100)
+        compCertainty.set_batchbald_excluded_samples(labeled_samples)
 
         with h5py.File(featurePath, 'r') as ffptr:
             prog.item_progress(item, 0)
@@ -545,6 +551,7 @@ class SuperpixelClassificationBase:
             # bayesian_samples, num_classes) if 'batchbald' is selected, otherwise the
             # shape should be (num_superpixels, num_classes).
             print_fully('catWeights', catWeights)
+            # Ask compCertainty to compute certainties
             cert = compCertainty.from_numpy_array(catWeights)
             # After the call to compCertainty, those numbers that end up as values for
             # annot's keys 'values', 'confidence', 'categoryConfidence', and 'certainty'
