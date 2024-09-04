@@ -31,6 +31,7 @@ class _LogTensorflowProgress(tf.keras.callbacks.Callback):
 class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
     def trainModelDetails(self, record, annotationName, batchSize, epochs, itemsAndAnnot, prog,
                           tempdir, trainingSplit):
+        # print(f'Tensorflow trainModelDetails(batchSize={batchSize}, ...)')
         # generate split
         full_ds = tf.data.Dataset.from_tensor_slices((record['ds'], record['labelds']))
         full_ds = full_ds.shuffle(1000)  # add seed=123 ?
@@ -75,11 +76,11 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         return history, modelPath
 
     def predictLabelsForItemDetails(self, batchSize, ds, item, model, prog):
-        # TODO: !!! Should we create a tf.data.Dataset.from_tensor_slices from ds, then
-        # invoke .batch(bathSize), and then give to model.predict()?  Otherwise,
-        # batchSize seems to be ignored.
+        # print(f'Tensorflow predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         predictions = model.predict(
-            ds, callbacks=[_LogTensorflowProgress(
+            ds,
+            batch_size=batchSize,
+            callbacks=[_LogTensorflowProgress(
                 prog, (ds.shape[0] + batchSize - 1) // batchSize, 0.05, 0.35, item)])
         prog.item_progress(item, 0.4)
         # softmax to scale to 0 to 1
