@@ -138,6 +138,13 @@
       <description>Labels for random input</description>
       <default>Tissue,Background,Marker</default>
     </string-vector>
+    <string-vector>
+      <name>exclude</name>
+      <longflag>exclude</longflag>
+      <label>Exclude Labels</label>
+      <description>Labels excluded from training.  Any feature with this label is treated as unlabelled for the purposes of training</description>
+      <default>Exclude</default>
+    </string-vector>
     <boolean>
       <name>heatmaps</name>
       <longflag>heatmaps</longflag>
