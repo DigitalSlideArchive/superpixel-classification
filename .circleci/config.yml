@@ -48,3 +48,15 @@ workflows:
             branches:
               only:
                 - main
+
+  periodic:
+    triggers:
+      - schedule:
+          # Run every 4th of the month at 3 a.m.
+          cron: "0 3 4 * *"
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - build_docker
