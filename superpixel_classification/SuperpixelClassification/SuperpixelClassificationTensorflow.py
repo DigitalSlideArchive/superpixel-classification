@@ -1,5 +1,6 @@
 import os
 
+import h5py
 import tensorflow as tf
 from SuperpixelClassificationBase import SuperpixelClassificationBase
 
@@ -32,15 +33,6 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
     def trainModelDetails(self, record, annotationName, batchSize, epochs, itemsAndAnnot, prog,
                           tempdir, trainingSplit):
         # print(f'Tensorflow trainModelDetails(batchSize={batchSize}, ...)')
-        # generate split
-        full_ds = tf.data.Dataset.from_tensor_slices((record['ds'], record['labelds']))
-        full_ds = full_ds.shuffle(1000)  # add seed=123 ?
-        count = len(full_ds)
-        train_size = int(count * trainingSplit)
-        train_ds = full_ds.take(train_size).batch(batchSize)
-        val_ds = full_ds.skip(train_size).batch(batchSize)
-        print(batchSize, train_ds, val_ds)
-        prog.progress(0.2)
         # make model
         num_classes = len(record['labels'])
         model = tf.keras.Sequential([
@@ -55,10 +47,22 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
             # tf.keras.layers.Dropout(0.2),
             tf.keras.layers.Dense(128, activation='relu'),
             tf.keras.layers.Dense(num_classes)])
-        prog.progress(0.4)
+        prog.progress(0.2)
         model.compile(optimizer='adam',
                       loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                       metrics=['accuracy'])
+        prog.progress(0.7)
+        # generate split
+        full_ds = tf.data.Dataset.from_tensor_slices((record['ds'], record['labelds']))
+        full_ds = full_ds.shuffle(1000)  # add seed=123 ?
+        count = len(full_ds)
+        train_size = int(count * trainingSplit)
+        if batchSize < 1:
+            batchSize = self.findOptimalBatchSize(model, full_ds)
+            print(f'Optimal batch size for training = {batchSize}')
+        train_ds = full_ds.take(train_size).batch(batchSize)
+        val_ds = full_ds.skip(train_size).batch(batchSize)
+        print(batchSize, train_ds, val_ds)
         prog.progress(0.9)
         prog.progress(1)
         prog.message('Training model')
@@ -75,8 +79,13 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         self.saveModel(model, modelPath)
         return history, modelPath
 
-    def predictLabelsForItemDetails(self, batchSize, ds, item, model, prog):
+    def predictLabelsForItemDetails(
+        self, batchSize, ds: h5py._hl.dataset.Dataset, item, model, prog,
+    ):
         # print(f'Tensorflow predictLabelsForItemDetails(batchSize={batchSize}, ...)')
+        if batchSize < 1:
+            batchSize = self.findOptimalBatchSize(model, tf.data.Dataset.from_tensor_slices(ds))
+            print(f'Optimal batch size for prediction = {batchSize}')
         predictions = model.predict(
             ds,
             batch_size=batchSize,
@@ -86,6 +95,19 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         # softmax to scale to 0 to 1
         catWeights = tf.nn.softmax(predictions)
         return catWeights, predictions
+
+    def findOptimalBatchSize(self, model, ds) -> int:
+        # Find an optimal batch_size
+        maximum_batchSize: int = 65536  # power of two
+        batchSize: int = 1
+        while batchSize < maximum_batchSize:
+            batchSize *= 2
+            try:
+                small_ds = ds.take(batchSize).batch(batchSize)
+                model.predict(small_ds, batch_size=batchSize)
+            except tf.errors.OpError:
+                return batchSize // 2
+        return batchSize
 
     def loadModel(self, modelPath):
         return tf.keras.models.load_model(modelPath)
