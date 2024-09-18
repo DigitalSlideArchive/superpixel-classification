@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Any, Sequence
 
 import batchbald_redux as bbald
@@ -360,25 +361,35 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         self, model: torch.nn.Module, ds: torch.utils.data.TensorDataset,
     ) -> int:
         # Find an optimal batch_size
-        maximum_batchSize: int = 65536  # power of two
-        batchSize: int = 1
-        while batchSize < maximum_batchSize:
-            batchSize *= 2
+        maximum_batchSize: int = ds.tensors[0].shape[0]
+        batchSize: int = 2
+        # We are using a value greater than 0.0 for add_seconds so that small imprecise
+        # timings for small batch sizes don't accidentally trip the time check.
+        add_seconds: float = 1.0
+        previous_time: float = 1e100
+        while batchSize <= maximum_batchSize:
             try:
                 dl: torch.utils.data.DataLoader
                 dl = torch.utils.data.DataLoader(ds, batch_size=batchSize)
+                start_time = time.time()
                 with torch.no_grad():
                     model.eval()  # Tell torch that we will be doing predictions
                     data: Sequence[torch.Tensor] = next(iter(dl))
                     inputs: torch.Tensor = data[0]
                     inputs = inputs.to(model.device)
                     model(inputs, model.bayesian_samples)
+                elapsed_time = time.time() - start_time
+                if elapsed_time > 2 * previous_time + add_seconds:
+                    return batchSize // 2
+                previous_time = elapsed_time
             except RuntimeError as e:
                 if 'out of memory' in str(e):
                     return batchSize // 2
                 else:
                     raise e
-        return batchSize
+            batchSize *= 2
+        # Undo the last doubling; it was spurious
+        return batchSize // 2
 
     def loadModel(self, modelPath):
         model = torch.load(modelPath)

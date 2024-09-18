@@ -1,4 +1,5 @@
 import os
+import time
 
 import h5py
 import tensorflow as tf
@@ -98,16 +99,26 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
 
     def findOptimalBatchSize(self, model, ds) -> int:
         # Find an optimal batch_size
-        maximum_batchSize: int = 65536  # power of two
-        batchSize: int = 1
-        while batchSize < maximum_batchSize:
-            batchSize *= 2
+        maximum_batchSize: int = len(ds)
+        batchSize: int = 2
+        # We are using a value greater than 0.0 for add_seconds so that small imprecise
+        # timings for small batch sizes don't accidentally trip the time check.
+        add_seconds: float = 0.5
+        previous_time: float = 1e100
+        while batchSize <= maximum_batchSize:
             try:
                 small_ds = ds.take(batchSize).batch(batchSize)
+                start_time = time.time()
                 model.predict(small_ds, batch_size=batchSize)
+                elapsed_time = time.time() - start_time
+                if elapsed_time > 2 * previous_time + add_seconds:
+                    return batchSize // 2
+                previous_time = elapsed_time
             except tf.errors.OpError:
                 return batchSize // 2
-        return batchSize
+            batchSize *= 2
+        # Undo the last doubling; it was spurious
+        return batchSize // 2
 
     def loadModel(self, modelPath):
         return tf.keras.models.load_model(modelPath)
