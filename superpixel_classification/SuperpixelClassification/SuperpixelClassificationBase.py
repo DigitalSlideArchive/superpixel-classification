@@ -408,7 +408,8 @@ class SuperpixelClassificationBase:
         print('Found %d item(s) with features' % len(results))
         return results
 
-    def trainModelAddItem(self, gc, record, item, annotrec, elem, feature, randomInput, labelList):
+    def trainModelAddItem(self, gc, record, item, annotrec, elem, feature,
+                          randomInput, labelList, excludeLabelList):
         if not randomInput and not any(v for v in elem['values']):
             return
         print('Adding %s, %s (%s:%r) for training' % (
@@ -420,6 +421,8 @@ class SuperpixelClassificationBase:
             for idx, labelnum in enumerate(elem['values']):
                 if labelnum and labelnum < len(elem['categories']):
                     labelname = elem['categories'][labelnum]['label']
+                    if labelname in excludeLabelList:
+                        continue
                     if labelname not in record['groups']:
                         record['groups'][labelname] = elem['categories'][labelnum]
                 elif randomInput:
@@ -448,7 +451,8 @@ class SuperpixelClassificationBase:
                           '%5.3f' % (time.time() - record['starttime']))
 
     def trainModel(self, gc, folderId, annotationName, features, modelFolderId,
-                   batchSize, epochs, trainingSplit, randomInput, labelList, prog):
+                   batchSize, epochs, trainingSplit, randomInput, labelList,
+                   excludeLabelList, prog):
         itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
             trainingPath = os.path.join(tempdir, 'training.h5')
@@ -470,8 +474,10 @@ class SuperpixelClassificationBase:
                     prog.progress(idx / len(itemsAndAnnot))
                     if item['_id'] not in features:
                         continue
-                    self.trainModelAddItem(gc, record, item, annotrec, elem,
-                                           features.get(item['_id']), randomInput, labelList)
+                    self.trainModelAddItem(
+                        gc, record, item, annotrec, elem,
+                        features.get(item['_id']), randomInput, labelList,
+                        set(excludeLabelList))
                 prog.progress(1)
                 if not record['ds']:
                     print('No labeled data')
@@ -798,7 +804,7 @@ class SuperpixelClassificationBase:
             if args.train:
                 self.trainModel(
                     gc, args.images, args.annotationName, features, args.modeldir, args.batchSize,
-                    args.epochs, args.split, args.randominput, args.labels, prog)
+                    args.epochs, args.split, args.randominput, args.labels, args.exclude, prog)
 
             self.predictLabels(
                 gc, args.images, args.annotationName, features, args.modeldir, args.annotationDir,
