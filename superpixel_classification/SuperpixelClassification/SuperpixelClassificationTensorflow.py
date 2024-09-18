@@ -1,5 +1,6 @@
 import os
 import time
+from typing import Optional
 
 import h5py
 import tensorflow as tf
@@ -31,6 +32,10 @@ class _LogTensorflowProgress(tf.keras.callbacks.Callback):
 
 
 class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
+    def __init__(self):
+        self.training_optimal_batchsize: Optional[int] = None
+        self.prediction_optimal_batchsize: Optional[int] = None
+
     def trainModelDetails(self, record, annotationName, batchSize, epochs, itemsAndAnnot, prog,
                           tempdir, trainingSplit):
         # print(f'Tensorflow trainModelDetails(batchSize={batchSize}, ...)')
@@ -59,7 +64,7 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         count = len(full_ds)
         train_size = int(count * trainingSplit)
         if batchSize < 1:
-            batchSize = self.findOptimalBatchSize(model, full_ds)
+            batchSize = self.findOptimalBatchSize(model, full_ds, training=True)
             print(f'Optimal batch size for training = {batchSize}')
         train_ds = full_ds.take(train_size).batch(batchSize)
         val_ds = full_ds.skip(train_size).batch(batchSize)
@@ -85,7 +90,9 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
     ):
         # print(f'Tensorflow predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         if batchSize < 1:
-            batchSize = self.findOptimalBatchSize(model, tf.data.Dataset.from_tensor_slices(ds))
+            batchSize = self.findOptimalBatchSize(
+                model, tf.data.Dataset.from_tensor_slices(ds), training=False,
+            )
             print(f'Optimal batch size for prediction = {batchSize}')
         predictions = model.predict(
             ds,
@@ -97,7 +104,11 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         catWeights = tf.nn.softmax(predictions)
         return catWeights, predictions
 
-    def findOptimalBatchSize(self, model, ds) -> int:
+    def findOptimalBatchSize(self, model, ds, training) -> int:
+        if training and self.training_optimal_batchsize is not None:
+            return self.training_optimal_batchsize
+        if not training and self.prediction_optimal_batchsize is not None:
+            return self.prediction_optimal_batchsize
         # Find an optimal batch_size
         maximum_batchSize: int = len(ds)
         batchSize: int = 2
@@ -112,13 +123,23 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
                 model.predict(small_ds, batch_size=batchSize)
                 elapsed_time = time.time() - start_time
                 if elapsed_time > 2 * previous_time + add_seconds:
-                    return batchSize // 2
+                    batchSize //= 2
+                    return self.cacheOptimalBatchSize(batchSize, model, training)
                 previous_time = elapsed_time
             except tf.errors.OpError:
-                return batchSize // 2
+                batchSize //= 2
+                return self.cacheOptimalBatchSize(batchSize, model, training)
             batchSize *= 2
         # Undo the last doubling; it was spurious
-        return batchSize // 2
+        batchSize //= 2
+        return self.cacheOptimalBatchSize(batchSize, model, training)
+
+    def cacheOptimalBatchSize(self, batchSize: int, model: torch.nn.Module, training: bool) -> int:
+        if training:
+            self.training_optimal_batchsize = batchSize
+        else:
+            self.prediction_optimal_batchsize = batchSize
+        return batchSize
 
     def loadModel(self, modelPath):
         return tf.keras.models.load_model(modelPath)
