@@ -110,11 +110,11 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         if not training and self.prediction_optimal_batchsize is not None:
             return self.prediction_optimal_batchsize
         # Find an optimal batch_size
-        maximum_batchSize: int = len(ds)
+        maximum_batchSize: int = 2 * len(ds) - 1
         batchSize: int = 2
         # We are using a value greater than 0.0 for add_seconds so that small imprecise
         # timings for small batch sizes don't accidentally trip the time check.
-        add_seconds: float = 0.5
+        add_seconds: float = 0.05
         previous_time: float = 1e100
         while batchSize <= maximum_batchSize:
             try:
@@ -134,7 +134,7 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         batchSize //= 2
         return self.cacheOptimalBatchSize(batchSize, model, training)
 
-    def cacheOptimalBatchSize(self, batchSize: int, model: torch.nn.Module, training: bool) -> int:
+    def cacheOptimalBatchSize(self, batchSize, model, training) -> int:
         if training:
             self.training_optimal_batchsize = batchSize
         else:
