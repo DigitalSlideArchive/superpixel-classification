@@ -105,8 +105,8 @@
       <longflag>batchsize</longflag>
       <label>Batch Size</label>
       <channel>input</channel>
-      <default>32</default>
-      <description>Training batch size</description>
+      <default>-1</default>
+      <description>Training batch size (-1 indicates optimal batch size)</description>
     </integer>
     <integer>
       <name>epochs</name>
