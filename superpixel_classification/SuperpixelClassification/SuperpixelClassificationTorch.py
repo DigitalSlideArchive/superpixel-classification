@@ -1,5 +1,6 @@
 import os
-from typing import Any, Sequence
+import time
+from typing import Any, Optional, Sequence
 
 import batchbald_redux as bbald
 import batchbald_redux.consistent_mc_dropout
@@ -133,6 +134,10 @@ class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
 
 
 class SuperpixelClassificationTorch(SuperpixelClassificationBase):
+    def __init__(self):
+        self.training_optimal_batchsize: Optional[int] = None
+        self.prediction_optimal_batchsize: Optional[int] = None
+
     def trainModelDetails(
         self,
         record,
@@ -144,6 +149,11 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         tempdir: str,
         trainingSplit: float,
     ):
+        # make model
+        num_classes: int = len(record['labels'])
+        model: torch.nn.Module = _BayesianTorchModel(num_classes)
+        model.to(model.device)
+
         # print(f'Torch trainModelDetails(batchSize={batchSize}, ...)')
         # Make a data set and a data loader for each of training and validation
         count: int = len(record['ds'])
@@ -167,17 +177,15 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         val_arg2 = torch.from_numpy(record['labelds'][val_indices])
         train_ds = torch.utils.data.TensorDataset(train_arg1, train_arg2)
         val_ds = torch.utils.data.TensorDataset(val_arg1, val_arg2)
+        if batchSize < 1:
+            batchSize = self.findOptimalBatchSize(model, train_ds, training=True)
+            print(f'Optimal batch size for training (device = {model.device}) = {batchSize}')
         train_dl = torch.utils.data.DataLoader(train_ds, batch_size=batchSize)
         val_dl = torch.utils.data.DataLoader(val_ds, batch_size=batchSize)
         prog.progress(0.2)
 
-        # make model
-        num_classes: int = len(record['labels'])
-        model: torch.nn.Module = _BayesianTorchModel(num_classes)
-        model.to(model.device)
         prog.message('Training model')
         prog.progress(0)
-
         history = self.fitModel(
             model, train_dl, val_dl, epochs, callbacks=[_LogTorchProgress(prog, epochs)],
         )
@@ -300,7 +308,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         return history
 
     def predictLabelsForItemDetails(
-            self, batchSize: int, ds_h5, item, model: torch.nn.Module, prog: ProgressHelper,
+        self, batchSize: int, ds_h5, item, model: torch.nn.Module, prog: ProgressHelper,
     ):
         # print(f'Torch predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         num_superpixels: int = ds_h5.shape[0]
@@ -323,6 +331,9 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         ds: torch.utils.data.TensorDataset = torch.utils.data.TensorDataset(
             torch.from_numpy(np.array(ds_h5).transpose((0, 3, 2, 1))),
         )
+        if batchSize < 1:
+            batchSize = self.findOptimalBatchSize(model, ds, training=False)
+            print(f'Optimal batch size for prediction (device = {model.device}) = {batchSize}')
         dl: torch.utils.data.DataLoader = torch.utils.data.DataLoader(ds, batch_size=batchSize)
         predictions: NDArray[np.float_] = np.zeros((num_superpixels, bayesian_samples, num_classes))
         catWeights: NDArray[np.float_] = np.zeros((num_superpixels, bayesian_samples, num_classes))
@@ -349,6 +360,54 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         prog.item_progress(item, 0.4)
         # scale to units
         return catWeights, predictions
+
+    def findOptimalBatchSize(
+        self, model: torch.nn.Module, ds: torch.utils.data.TensorDataset, training: bool,
+    ) -> int:
+        if training and self.training_optimal_batchsize is not None:
+            return self.training_optimal_batchsize
+        if not training and self.prediction_optimal_batchsize is not None:
+            return self.prediction_optimal_batchsize
+        # Find an optimal batch_size
+        maximum_batchSize: int = 2 * ds.tensors[0].shape[0] - 1
+        batchSize: int = 2
+        # We are using a value greater than 0.0 for add_seconds so that small imprecise
+        # timings for small batch sizes don't accidentally trip the time check.
+        add_seconds: float = 0.05
+        previous_time: float = 1e100
+        while batchSize <= maximum_batchSize:
+            try:
+                dl: torch.utils.data.DataLoader
+                dl = torch.utils.data.DataLoader(ds, batch_size=batchSize)
+                start_time = time.time()
+                with torch.no_grad():
+                    model.eval()  # Tell torch that we will be doing predictions
+                    data: Sequence[torch.Tensor] = next(iter(dl))
+                    inputs: torch.Tensor = data[0]
+                    inputs = inputs.to(model.device)
+                    model(inputs, model.bayesian_samples)
+                elapsed_time = time.time() - start_time
+                if elapsed_time > 2 * previous_time + add_seconds:
+                    batchSize //= 2
+                    return self.cacheOptimalBatchSize(batchSize, model, training)
+                previous_time = elapsed_time
+            except RuntimeError as e:
+                if 'out of memory' in str(e):
+                    batchSize //= 2
+                    return self.cacheOptimalBatchSize(batchSize, model, training)
+                else:
+                    raise e
+            batchSize *= 2
+        # Undo the last doubling; it was spurious
+        batchSize //= 2
+        return self.cacheOptimalBatchSize(batchSize, model, training)
+
+    def cacheOptimalBatchSize(self, batchSize: int, model: torch.nn.Module, training: bool) -> int:
+        if training:
+            self.training_optimal_batchsize = batchSize
+        else:
+            self.prediction_optimal_batchsize = batchSize
+        return batchSize
 
     def loadModel(self, modelPath):
         model = torch.load(modelPath)
