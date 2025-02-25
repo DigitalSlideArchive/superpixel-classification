@@ -410,9 +410,15 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         return batchSize
 
     def loadModel(self, modelPath):
-        model = torch.load(modelPath, weights_only=False)
-        model.eval()
-        return model
+        self.add_safe_globals()
+        try:
+            model = torch.load(modelPath, weights_only=False)
+            model.eval()
+            return model
+        except Exception as e:
+            print(f"Unable to load {modelPath}")
+            raise
+
 
     def saveModel(self, model, modelPath):
         torch.save(model, modelPath)
