@@ -198,5 +198,12 @@
       <default>4</default>
       <description>The number of worker threads for superpixel and feature generation</description>
     </integer>
+    <integer>
+      <name>cutoff</name>
+      <longflag>cutoff</longflag>
+      <label>Number of annotations per slide</label>
+      <default>500</default>
+      <description>Number of unannotated superpixels to use per slide for features, training and predictions</description>
+    </integer>
   </parameters>
 </executable>
