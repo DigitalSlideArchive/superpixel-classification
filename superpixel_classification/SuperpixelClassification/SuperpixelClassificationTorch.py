@@ -410,7 +410,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         return batchSize
 
     def loadModel(self, modelPath):
-        model = torch.load(modelPath)
+        model = torch.load(modelPath, weights_only=False)
         model.eval()
         return model
 
