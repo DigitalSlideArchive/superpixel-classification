@@ -651,7 +651,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
 
     def loadModel(self, modelPath):
         self.add_safe_globals()
-        model = torch.load(modelPath)
+        model = torch.load(modelPath, weights_only=False)
         model.eval()
         return model
 
