@@ -651,9 +651,14 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
 
     def loadModel(self, modelPath):
         self.add_safe_globals()
-        model = torch.load(modelPath, weights_only=False)
-        model.eval()
-        return model
+        try:
+            model = torch.load(modelPath, weights_only=False)
+            model.eval()
+            return model
+        except Exception as e:
+            print(f"Unable to load {modelPath}")
+            raise
+
 
     def saveModel(self, model, modelPath):
         self.add_safe_globals()
