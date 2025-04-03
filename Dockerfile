@@ -13,7 +13,7 @@ RUN apt-get update && \
 
 COPY . /opt/scw
 WORKDIR /opt/scw
-RUN python -m pip install --no-cache-dir -e .[tensorflow,torch] --find-links https://girder.github.io/large_image_wheels --extra-index-url https://download.pytorch.org/whl/cu117 && \
+RUN python -m pip install --no-cache-dir -e .[tensorflow,torch] --find-links https://girder.github.io/large_image_wheels --extra-index-url https://download.pytorch.org/whl/cu126 && \
     rm -rf /root/.cache/pip/* && \
     rdfind -minsize 32768 -makehardlinks true -makeresultsfile false /usr/local
 

@@ -14,9 +14,9 @@ import time
 import girder_client
 import h5py
 import numpy as np
+import tenacity
 from numpy.typing import NDArray
 from progress_helper import ProgressHelper
-from tenacity import Retrying, stop_after_attempt
 
 
 def summary_repr(contents, collapseSequences=False):
@@ -37,9 +37,7 @@ def summary_repr(contents, collapseSequences=False):
     A string representation of a summary of the object
 
     """
-    if isinstance(
-        contents, (bool, int, float, str, np.int32, np.int64, np.float32, np.float64),
-    ):
+    if isinstance(contents, (bool, int, float, str, np.int32, np.int64, np.float32, np.float64)):
         return repr(contents)
     if isinstance(contents, (list, tuple, dict, set)) and len(contents) == 0:
         return repr(type(contents)())
@@ -90,11 +88,7 @@ def summary_repr(contents, collapseSequences=False):
                 f", 'and {len(contents) - 1} more'" +
                 '}'
             )
-        return (
-            '{' +
-            ', '.join([summary_repr(elem, collapseSequences) for elem in contents]) +
-            '}'
-        )
+        return '{' + ', '.join([summary_repr(elem, collapseSequences) for elem in contents]) + '}'
     if isinstance(contents, np.ndarray):
         return (
             repr(type(contents)) +
@@ -245,7 +239,7 @@ class SuperpixelClassificationBase:
             SuperpixelSegmentation.createSuperPixels(spopts)
             del spopts.callback
             prog.item_progress(item, 0.9)
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     outImageFile = gc.uploadFileToFolder(annotationFolderId, outImagePath)
             outImageId = outImageFile['itemId']
@@ -260,7 +254,7 @@ class SuperpixelClassificationBase:
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(annot, annotation_file, indent=2, sort_keys=False)
             count = len(gc.get('annotation', parameters=dict(itemId=item['_id'])))
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     gc.uploadFileToItem(
                         item['_id'], outAnnotationPath,
@@ -300,12 +294,51 @@ class SuperpixelClassificationBase:
             results[item['_id']] = future.result()
         return results
 
+    def initializeCreateFeatureFromPatchAndMaskSimple(self):
+        # There is nothing to initialize
+        pass
+
+    def initializeCreateFeatureFromPatchAndMask(self):
+        # This SuperpixelClassificationBase implementation allows only the "Simple"
+        # approach.
+        # assert self.feature_is_image
+        self.initializeCreateFeatureFromPatchAndMaskSimple()
+
+    def createFeatureFromPatchAndMaskSimple(self, patch, mask, maskvals):
+        feature = np.array(patch.copy()).astype(np.uint8)
+        feature[(mask != maskvals[0]).any(axis=-1) & (mask != maskvals[1]).any(axis=-1)] = [0, 0, 0]
+        return feature
+
+    def createFeatureListFromPatchAndMaskListSimple(self, patch_list, mask_list, maskvals_list):
+        feature_list = [
+            self.createFeatureFromPatchAndMaskSimple(patch, mask, maskvals)
+            for patch, mask, maskvals in zip(patch_list, mask_list, maskvals_list)
+        ]
+        return feature_list
+
+    def createFeatureFromPatchAndMask(self, patch, mask, maskvals):
+        # This SuperpixelClassificationBase implementation allows only the "Simple"
+        # approach.
+        # assert self.feature_is_image
+        feature = self.createFeatureFromPatchAndMaskSimple(patch, mask, maskvals)
+        return feature
+
+    def createFeatureListFromPatchAndMaskList(self, patch_list, mask_list, maskvals_list):
+        # This SuperpixelClassificationBase implementation allows only the "Simple"
+        # approach.
+        # assert self.feature_is_image
+        feature_list = self.createFeatureListFromPatchAndMaskListSimple(
+            patch_list, mask_list, maskvals_list,
+        )
+        return feature_list
+
     def createFeaturesForItem(self, gc, item, elem, featureFolderId, fileName, patchSize, prog):
         import large_image
 
         print('Create feature', fileName)
         lastlog = starttime = time.time()
         ds = None
+        self.initializeCreateFeatureFromPatchAndMask()
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
             filePath = os.path.join(tempdir, fileName)
             imagePath = os.path.join(tempdir, item['name'])
@@ -317,57 +350,69 @@ class SuperpixelClassificationBase:
             tsMask = large_image.open(maskPath)
 
             with h5py.File(filePath, 'w') as fptr:
-                for idx, _ in enumerate(elem['values']):
-                    prog.item_progress(item, 0.9 * idx / len(elem['values']))
-                    bbox = elem['user']['bbox'][idx * 4: idx * 4 + 4]
-                    # use masked superpixel
-                    patch = ts.getRegion(
-                        region=dict(
-                            left=int(bbox[0]), top=int(bbox[1]),
-                            right=int(bbox[2]), bottom=int(bbox[3])),
-                        output=dict(maxWidth=patchSize, maxHeight=patchSize),
-                        fill='#000',
-                        format=large_image.constants.TILE_FORMAT_NUMPY)[0]
-                    if patch.shape[2] in (2, 4):
-                        patch = patch[:, :, :-1]
-                    scale = 1
-                    try:
-                        scale = elem['transform']['matrix'][0][0]
-                    except Exception:
-                        pass
-                    mask = tsMask.getRegion(
-                        region=dict(
-                            left=int(bbox[0] / scale), top=int(bbox[1] / scale),
-                            right=int(bbox[2] / scale), bottom=int(bbox[3] / scale)),
-                        output=dict(maxWidth=patchSize, maxHeight=patchSize),
-                        fill='#000',
-                        format=large_image.constants.TILE_FORMAT_NUMPY)[0]
-                    if mask.shape[2] == 4:
-                        mask = mask[:, :, :-1]
-                    maskvals = [[val % 256, val // 256 % 256, val // 65536 % 256]
-                                for val in [idx * 2, idx * 2 + 1]]
-                    patch = patch.copy()
-                    patch[(mask != maskvals[0]).any(axis=-1) &
-                          (mask != maskvals[1]).any(axis=-1)] = [0, 0, 0]
-                    # TODO: ensure this is uint8
-                    if not ds:
-                        ds = fptr.create_dataset(
-                            'images', (1,) + patch.shape, maxshape=(None,) + patch.shape,
-                            dtype=patch.dtype, chunks=True)
-                    else:
-                        ds.resize((ds.shape[0] + 1,) + patch.shape)
-                    ds[ds.shape[0] - 1] = patch
-                    if time.time() - lastlog > 5:
-                        lastlog = time.time()
-                        print(ds.shape, len(elem['values']),
-                              '%5.3f' % (time.time() - starttime),
-                              '%5.3f' % ((len(elem['values']) - idx - 1) / (idx + 1) *
-                                         (time.time() - starttime)),
-                              item['name'])
+                batch_size = 1024  # TODO: Is this the best value?
+                for batch_start in range(0, len(elem['values']), batch_size):
+                    batch_list = elem['values'][batch_start: batch_start + batch_size]
+                    patch_list = []
+                    mask_list = []
+                    maskvals_list = []
+                    for idx, _ in enumerate(batch_list, start=batch_start):
+                        prog.item_progress(item, 0.9 * idx / len(elem['values']))
+                        bbox = elem['user']['bbox'][idx * 4: idx * 4 + 4]
+                        # use masked superpixel
+                        patch = ts.getRegion(
+                            region=dict(
+                                left=int(bbox[0]), top=int(bbox[1]),
+                                right=int(bbox[2]), bottom=int(bbox[3])),
+                            output=dict(maxWidth=patchSize, maxHeight=patchSize),
+                            fill='#000',
+                            format=large_image.constants.TILE_FORMAT_NUMPY)[0]
+                        if patch.shape[2] in (2, 4):
+                            patch = patch[:, :, :-1]
+                        scale = 1
+                        try:
+                            scale = elem['transform']['matrix'][0][0]
+                        except Exception:
+                            pass
+                        mask = tsMask.getRegion(
+                            region=dict(
+                                left=int(bbox[0] / scale), top=int(bbox[1] / scale),
+                                right=int(bbox[2] / scale), bottom=int(bbox[3] / scale)),
+                            output=dict(maxWidth=patchSize, maxHeight=patchSize),
+                            fill='#000',
+                            format=large_image.constants.TILE_FORMAT_NUMPY)[0]
+                        if mask.shape[2] == 4:
+                            mask = mask[:, :, :-1]
+                        maskvals = [[val % 256, val // 256 % 256, val // 65536 % 256]
+                                    for val in [idx * 2, idx * 2 + 1]]
+                        patch_list.append(patch)
+                        mask_list.append(mask)
+                        maskvals_list.append(maskvals)
+                        # Make sure only the *_list forms are used subsequently
+                        del patch, mask, maskvals
+                    feature_list = self.createFeatureListFromPatchAndMaskList(
+                        patch_list, mask_list, maskvals_list,
+                    )
+                    for idx, feature in enumerate(feature_list, start=batch_start):
+                        if not ds:
+                            ds = fptr.create_dataset(
+                                'images', (1,) + feature.shape, maxshape=(None,) + feature.shape,
+                                dtype=np.float32, chunks=True)
+                        else:
+                            ds.resize((ds.shape[0] + 1,) + feature.shape)
+                        ds[ds.shape[0] - 1] = feature
+                        if time.time() - lastlog > 5:
+                            lastlog = time.time()
+                            print(ds.shape, len(elem['values']),
+                                  '%5.3f' % (time.time() - starttime),
+                                  '%5.3f' % ((len(elem['values']) - idx - 1) / (idx + 1) *
+                                             (time.time() - starttime)),
+                                  item['name'])
+                    del batch_list, patch_list, mask_list, maskvals_list, feature_list
                 print(ds.shape, len(elem['values']), '%5.3f' % (time.time() - starttime),
                       item['name'])
             prog.item_progress(item, 0.9)
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     file = gc.uploadFileToFolder(featureFolderId, filePath)
             prog.item_progress(item, 1)
@@ -503,11 +548,11 @@ class SuperpixelClassificationBase:
                     except AttributeError as exc:
                         print(f'Cannot pickle history; skipping.  {exc}')
                 prog.progress(1)
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
             print('Saved model')
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     modTrainingFile = gc.uploadFileToFolder(modelFolderId, modTrainingPath)
             print('Saved modTraining')
@@ -596,7 +641,7 @@ class SuperpixelClassificationBase:
             print_fully('annot', annot)
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(annot, annotation_file, indent=2, sort_keys=False)
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     gc.uploadFileToItem(
                         item['_id'], outAnnotationPath, reference=json.dumps({
@@ -614,7 +659,7 @@ class SuperpixelClassificationBase:
             print_fully('newAnnot', newAnnot)
             with open(outAnnotationPath, 'w') as annotation_file:
                 json.dump(newAnnot, annotation_file, indent=2, sort_keys=False)
-            for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+            for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     gc.uploadFileToItem(
                         item['_id'], outAnnotationPath, reference=json.dumps({
@@ -706,7 +751,7 @@ class SuperpixelClassificationBase:
         print_fully('heatmaps', heatmaps)
         with open(outAnnotationPath, 'w') as annotation_file:
             json.dump(heatmaps, annotation_file, indent=2, sort_keys=False)
-        for attempt in Retrying(stop=stop_after_attempt(self.uploadRetries)):
+        for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
             with attempt:
                 gc.uploadFileToItem(
                     item['_id'],
@@ -784,6 +829,9 @@ class SuperpixelClassificationBase:
             prog.progress(1)
 
     def main(self, args):
+        self.feature_is_image = args.feature != 'vector'
+        self.certainty = args.certainty
+
         print('\n>> CLI Parameters ...\n')
         pprint.pprint(vars(args))
 

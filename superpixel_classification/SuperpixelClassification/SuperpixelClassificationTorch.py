@@ -13,12 +13,7 @@ from SuperpixelClassificationBase import SuperpixelClassificationBase
 
 class _LogTorchProgress:
     def __init__(
-        self,
-        prog: ProgressHelper,
-        total: int,
-        start: float = 0.0,
-        width: float = 1.0,
-        item=None,
+        self, prog: ProgressHelper, total: int, start: float = 0.0, width: float = 1.0, item=None,
     ) -> None:
         """Pass a progress class and the total number of total"""
         self.prog: ProgressHelper = prog
@@ -67,17 +62,18 @@ class _LogTorchProgress:
             self.prog.item_progress(self.item, val)
 
 
-class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
+class _BayesianPatchTorchModel(bbald.consistent_mc_dropout.BayesianModule):
+    # A Bayesian model that takes patches (2-dimensional shape) rather than vectors
+    # (1-dimensional shape) as input.  It is useful when feature != 'vector' and
+    # SuperpixelClassificationBase.certainty == 'batchbald'.
     def __init__(self, num_classes: int) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
         self.device: str = torch.device(
-            'cuda'
-            if torch.cuda.is_available() and torch.cuda.device_count() > 0
-            else 'cpu',
+            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
         )
         # print(f'Initial model.device = {self.device}')
-        super(_BayesianTorchModel, self).__init__()
+        super(_BayesianPatchTorchModel, self).__init__()
 
         self.conv1: torch.Module
         self.conv1_drop: torch.Module
@@ -133,10 +129,177 @@ class _BayesianTorchModel(bbald.consistent_mc_dropout.BayesianModule):
         return input
 
 
+class _VectorTorchModel(torch.nn.Module):
+    # A non-Bayesian model that takes vectors (1-dimensional shape) rather than patches
+    # (2-dimensional shape) as input.  It is useful when feature == 'vector' and
+    # SuperpixelClassificationBase.certainty != 'batchbald'.
+
+    def __init__(self, input_dim: int, num_classes: int) -> None:
+        # Set `self.device` as early as possible so that other code does not lock out
+        # what we want.
+        self.device: str = torch.device(
+            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
+        )
+        # print(f'Initial model.device = {self.device}')
+        super(_VectorTorchModel, self).__init__()
+
+        self.input_dim: int = input_dim
+        self.num_classes: int = num_classes
+        self.fc: torch.Module = torch.nn.Linear(input_dim, num_classes)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # TODO: Is torch.mul appropriate here?
+        input = torch.mul(input, 1.0 / 255)
+        input = self.fc(input)
+        # To remain consistent with the Tensorflow implementation, we will not include
+        # `input = torch.nn.functional.log_softmax(input, dim=1)` at this point.
+        return input
+
+
+class _BayesianVectorTorchModel(bbald.consistent_mc_dropout.BayesianModule):
+    # A Bayesian model that takes vectors (1-dimensional shape) rather than patches
+    # (2-dimensional shape) as input.  It is useful when feature == 'vector' and
+    # SuperpixelClassificationBase.certainty == 'batchbald'.
+
+    def __init__(self, input_dim: int, num_classes: int) -> None:
+        # Set `self.device` as early as possible so that other code does not lock out
+        # what we want.
+        self.device: str = torch.device(
+            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
+        )
+        # print(f'Initial model.device = {self.device}')
+        super(_BayesianVectorTorchModel, self).__init__()
+
+        self.input_dim: int = input_dim
+        self.num_classes: int = num_classes
+        self.bayesian_samples: int = 12
+        self.fc: torch.Module = torch.nn.Linear(input_dim, num_classes)
+        self.fc_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout()
+
+    def mc_forward_impl(self, input: torch.Tensor) -> torch.Tensor:
+        # TODO: Is torch.mul appropriate here?
+        input = torch.mul(input, 1.0 / 255)
+        input = self.fc(input)
+        # TODO: Is it appropriate to have fc_drop as a last layer; we don't do that for
+        # batchbald on patches?  More generally, is subclassing from bbald and using
+        # self.bayesian_samples during training and/or prediction sufficient to make
+        # this model properly Bayesian?
+        input = self.fc_drop(input)
+        # To remain consistent with the Tensorflow implementation, we will not include
+        # `input = torch.nn.functional.log_softmax(input, dim=1)` at this point.
+        return input
+
+
 class SuperpixelClassificationTorch(SuperpixelClassificationBase):
     def __init__(self):
         self.training_optimal_batchsize: Optional[int] = None
         self.prediction_optimal_batchsize: Optional[int] = None
+
+    def initializeCreateFeatureFromPatchAndMaskUNI(self):
+        import timm
+        import timm.data
+        import timm.data.transforms_factory
+
+        """
+        To make the timm.create_model call succeed, be sure that a command like the following has
+        already been run from a bash prompt on each system supporting the
+        dsarchive/superpixel:latest docker image.  We need to run this command only if
+        .cache/huggingface/hub does not already have the MahmoodLab/UNI model.  Instead of
+        $HOME/.cache/huggingface/token in the following, use the actual location of your HuggingFace
+        token; for security reasons it is better if the token is not within the mount point, which
+        in this example is the tree rooted from the directory $HOME/.cache/huggingface/hub.
+
+          docker run \
+            --rm \
+            --env=HF_TOKEN=$(cat $HOME/.cache/huggingface/token) \
+            -v $HOME/.cache/huggingface/hub:/root/.cache/huggingface/hub:rw \
+            --entrypoint "" \
+            dsarchive/superpixel:latest \
+            huggingface-cli download MahmoodLab/UNI
+
+        Additionally, make sure that your `docker-compose.override.yml` file includes something like
+
+          services:
+            worker:
+              environment:
+                GIRDER_WORKER_DOCKER_RUN_OPTIONS: >-
+                  {"volumes":
+                    ["/path_to_home_directory/.cache/huggingface/hub:/root/.cache/huggingface/hub"],
+                    "environment": {"HF_HUB_OFFLINE": "1"}}
+        """
+
+        # pretrained=True needed to load UNI weights.  init_values need to be passed in to
+        # successfully load LayerScale parameters (e.g. - block.0.ls1.gamma)
+        model = timm.create_model(
+            'hf-hub:MahmoodLab/UNI',
+            pretrained=True,
+            init_values=1e-5,
+            dynamic_img_size=True,
+            dynamic_img_pad=True,
+        )
+        transform = timm.data.transforms_factory.create_transform(
+            **timm.data.resolve_data_config(model.pretrained_cfg, model=model),
+        )
+        model.eval()
+        self.UNI_model = model
+        self.UNI_transform = transform
+
+    def initializeCreateFeatureFromPatchAndMask(self):
+        # This SuperpixelClassificationTorch implementation supports both the Simple and
+        # UNI approaches.
+        if self.feature_is_image:
+            self.initializeCreateFeatureFromPatchAndMaskSimple()
+        else:
+            self.initializeCreateFeatureFromPatchAndMaskUNI()
+
+    def createFeatureFromPatchAndMaskUNI(self, patch, mask, maskvals):
+        return self.createFeatureListFromPatchAndMaskListUNI([patch], [mask], [maskvals])[0]
+
+    def createFeatureListFromPatchAndMaskListUNI(self, patch_list, mask_list, maskvals_list):
+        # As a first step, black out all pixels that are not part of the interior or border of the
+        # superpixel, exactly as we do with for the simple approach.
+        # Numpy order of dimensions is (element, height, width, channel) EHWC.  Torch order is ECHW.
+        patch_stack = torch.stack(
+            [
+                torch.tensor(patch, dtype=torch.float)
+                for patch in self.createFeatureListFromPatchAndMaskListSimple(
+                    patch_list, mask_list, maskvals_list,
+                )
+            ],
+            dim=0,
+        ).permute(0, 3, 1, 2)
+        # print(f'{patch_stack.shape = }', flush=True)
+        # Image resizing and normalization (ImageNet parameters).
+        # TODO: Is this scaling?  We should be centering and cropping.
+        patch_stack = self.UNI_transform(patch_stack)
+        # print(f'{patch_stack.shape = }', flush=True)
+        with torch.inference_mode():
+            feature_stack = self.UNI_model(patch_stack)
+            # print(f'{feature_stack.shape = }', flush=True)
+        feature_list = list(torch.unbind(feature_stack, dim=0))
+        return feature_list
+
+    def createFeatureFromPatchAndMask(self, patch, mask, maskvals):
+        # This SuperpixelClassificationTorch implementation supports both the Simple and
+        # UNI approaches.
+        if self.feature_is_image:
+            feature = self.createFeatureFromPatchAndMaskSimple(patch, mask, maskvals)
+        else:
+            feature = self.createFeatureFromPatchAndMaskUNI(patch, mask, maskvals)
+        return feature
+
+    def createFeatureListFromPatchAndMaskList(self, patch_list, mask_list, maskvals_list):
+        # This SuperpixelClassificationTorch implementation supports both the Simple and
+        # UNI approaches.
+        if self.feature_is_image:
+            feature_list = self.createFeatureListFromPatchAndMaskListSimple(
+                patch_list, mask_list, maskvals_list,
+            )
+        else:
+            feature_list = self.createFeatureListFromPatchAndMaskListUNI(
+                patch_list, mask_list, maskvals_list,
+            )
+        return feature_list
 
     def trainModelDetails(
         self,
@@ -151,7 +314,21 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
     ):
         # make model
         num_classes: int = len(record['labels'])
-        model: torch.nn.Module = _BayesianTorchModel(num_classes)
+        model: torch.nn.Module
+        if self.feature_is_image:
+            # Feature is patch
+            if self.certainty == 'batchbald':
+                model = _BayesianPatchTorchModel(num_classes)
+            else:
+                mesg = 'Expected torch model for input of type image to be Bayesian'
+                raise ValueError(mesg)
+        else:
+            # Feature is vector
+            input_dim: int = record['ds'].shape[1]
+            if self.certainty == 'batchbald':
+                model = _BayesianVectorTorchModel(input_dim, num_classes)
+            else:
+                model = _VectorTorchModel(input_dim, num_classes)
         model.to(model.device)
 
         # print(f'Torch trainModelDetails(batchSize={batchSize}, ...)')
@@ -171,9 +348,17 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         val_ds: torch.utils.data.TensorDataset
         train_dl: torch.utils.data.DataLoader
         val_dl: torch.utils.data.DataLoader
-        train_arg1 = torch.from_numpy(record['ds'][train_indices].transpose((0, 3, 2, 1)))
+        train_arg1 = (
+            torch.from_numpy(record['ds'][train_indices].transpose((0, 3, 2, 1)))
+            if self.feature_is_image
+            else torch.from_numpy(record['ds'][train_indices])
+        )
         train_arg2 = torch.from_numpy(record['labelds'][train_indices])
-        val_arg1 = torch.from_numpy(record['ds'][val_indices].transpose((0, 3, 2, 1)))
+        val_arg1 = (
+            torch.from_numpy(record['ds'][val_indices].transpose((0, 3, 2, 1)))
+            if self.feature_is_image
+            else torch.from_numpy(record['ds'][val_indices])
+        )
         val_arg2 = torch.from_numpy(record['labelds'][val_indices])
         train_ds = torch.utils.data.TensorDataset(train_arg1, train_arg2)
         val_ds = torch.utils.data.TensorDataset(val_arg1, val_arg2)
@@ -192,8 +377,10 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
 
         prog.message('Saving model')
         prog.progress(0)
-        modelPath: str = os.path.join(tempdir, '%s Model Epoch %d.pth' % (
-            annotationName, self.getCurrentEpoch(itemsAndAnnot)))
+        modelPath: str = os.path.join(
+            tempdir,
+            '%s Model Epoch %d.pth' % (annotationName, self.getCurrentEpoch(itemsAndAnnot)),
+        )
         self.saveModel(model, modelPath)
         return history, modelPath
 
@@ -209,9 +396,9 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         criterion = torch.nn.functional.nll_loss
         optimizer = torch.optim.Adam(model.parameters())
 
-        # TODO: Should training use as many bayesian samples as prediction does?!!!
-        num_training_samples: int = model.bayesian_samples
-        num_validation_samples: int = model.bayesian_samples
+        # TODO: Should training use as many bayesian samples as prediction does?
+        num_training_samples: int = model.bayesian_samples if self.certainty == 'batchbald' else 1
+        num_validation_samples: int = model.bayesian_samples if self.certainty == 'batchbald' else 1
         # Loop over the dataset multiple times
         epoch: int
         for epoch in range(epochs):
@@ -232,19 +419,26 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 optimizer.zero_grad()
 
                 # forward + backward + optimize
-                outputs = model(inputs, num_training_samples)
+                outputs = (
+                    model(inputs, num_training_samples)
+                    if self.certainty == 'batchbald'
+                    else model(inputs)
+                )
+                if len(outputs.shape) == 2:
+                    # Add a middle dimension, giving shape=(batch_size, 1, num_classes).
+                    outputs = outputs.unsqueeze(1)
                 outputs = torch.nn.functional.log_softmax(outputs, dim=-1)
+                assert len(outputs.shape) == 3
                 # outputs.shape == (batch_size, num_training_samples, num_classes).
                 # labels.shape  == (batch_size).
                 # Broadcast labels to the same shape as outputs.shape[0:2]
                 labels = labels[:, None].expand(*outputs.shape[0:2])
                 criterion_loss = criterion(
-                    outputs.reshape(-1, outputs.shape[-1]),
-                    labels.reshape(-1),
+                    outputs.reshape(-1, outputs.shape[-1]), labels.reshape(-1),
                 )
                 criterion_loss.backward()
                 optimizer.step()
-                new_size: int = inputs.size(0)
+                new_size: int = inputs.shape[0]
                 # print(f'new_size[{epoch}, {batch}] = {new_size}')
                 train_size += new_size
                 new_loss: float = criterion_loss.item() * new_size
@@ -277,20 +471,25 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                     inputs, labels = data
                     inputs = inputs.to(model.device)
                     labels = labels.to(model.device)
-                    outputs = model(inputs, num_validation_samples)
+                    outputs = (
+                        model(inputs, num_validation_samples)
+                        if self.certainty == 'batchbald'
+                        else model(inputs)
+                    )
+                    if len(outputs.shape) == 2:
+                        outputs = outputs.unsqueeze(1)
                     outputs = torch.nn.functional.log_softmax(outputs, dim=-1)
-                    # outputs.shape == (batch_size, num_training_samples, num_classes).
+                    assert len(outputs.shape) == 3
+                    # outputs.shape == (batch_size, num_validation_samples, num_classes).
                     # labels.shape  == (batch_size).
                     # Broadcast labels to the same shape as outputs.shape[0:2]
                     labels = labels[:, None].expand(*outputs.shape[0:2])
                     criterion_loss = criterion(
-                        outputs.reshape(-1, outputs.shape[-1]),
-                        labels.reshape(-1),
-                        reduction='sum',
+                        outputs.reshape(-1, outputs.shape[-1]), labels.reshape(-1), reduction='sum',
                     )
-                    new_size = inputs.size(0)
+                    new_size = inputs.shape[0]
                     validation_size += new_size
-                    new_loss = criterion_loss.item() * inputs.size(0)
+                    new_loss = criterion_loss.item() * new_size
                     validation_loss += new_loss
                     new_correct_t = (torch.argmax(outputs, dim=-1) == labels).float().sum()
                     new_correct = new_correct_t.detach().cpu().numpy()
@@ -313,23 +512,32 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         # print(f'Torch predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         num_superpixels: int = ds_h5.shape[0]
         # print(f'{num_superpixels = }')
-        bayesian_samples: int = model.bayesian_samples
+        bayesian_samples: int = model.bayesian_samples if self.certainty == 'batchbald' else 1
         # print(f'{bayesian_samples = }')
         num_classes: int = model.num_classes
         # print(f'{num_classes = }')
 
-        callbacks = [_LogTorchProgress(
-            prog, 1 + (num_superpixels - 1) // batchSize, 0.05, 0.35, item)]
-        logs = dict(
-            num_superpixels=num_superpixels,
-            bayesian_samples=bayesian_samples,
-            num_classes=num_classes,
+        callbacks = [
+            _LogTorchProgress(prog, 1 + (num_superpixels - 1) // batchSize, 0.05, 0.35, item),
+        ]
+        logs = (
+            dict(
+                num_superpixels=num_superpixels,
+                bayesian_samples=bayesian_samples,
+                num_classes=num_classes,
+            )
+            if self.certainty == 'batchbald'
+            else dict(num_superpixels=num_superpixels, num_classes=num_classes)
         )
         for cb in callbacks:
             cb.on_predict_begin(logs=logs)
 
         ds: torch.utils.data.TensorDataset = torch.utils.data.TensorDataset(
-            torch.from_numpy(np.array(ds_h5).transpose((0, 3, 2, 1))),
+            (
+                torch.from_numpy(np.array(ds_h5).transpose((0, 3, 2, 1)))
+                if self.feature_is_image
+                else torch.from_numpy(np.array(ds_h5))
+            ),
         )
         if batchSize < 1:
             batchSize = self.findOptimalBatchSize(model, ds, training=False)
@@ -347,10 +555,17 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 new_row = row + inputs.shape[0]
                 inputs = inputs.to(model.device)
                 # print(f'inputs[{i}].shape = {inputs.shape}')
-                predictions_raw = model(inputs, bayesian_samples)
+                predictions_raw = (
+                    model(inputs, bayesian_samples)
+                    if self.certainty == 'batchbald'
+                    else model(inputs)
+                )
+                if len(predictions_raw.shape) == 2:
+                    # Add a middle dimension of size 1
+                    predictions_raw = predictions_raw.unsqueeze(1)
+                # softmax to scale to 0 to 1.
                 catWeights_raw = torch.nn.functional.softmax(predictions_raw, dim=-1)
                 predictions[row:new_row, :, :] = predictions_raw.detach().cpu().numpy()
-                # softmax to scale to 0 to 1.
                 catWeights[row:new_row, :, :] = catWeights_raw.detach().cpu().numpy()
                 row = new_row
                 for cb in callbacks:
@@ -385,7 +600,10 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                     data: Sequence[torch.Tensor] = next(iter(dl))
                     inputs: torch.Tensor = data[0]
                     inputs = inputs.to(model.device)
-                    model(inputs, model.bayesian_samples)
+                    if self.certainty == 'batchbald':
+                        model(inputs, model.bayesian_samples)
+                    else:
+                        model(inputs)
                 elapsed_time = time.time() - start_time
                 if elapsed_time > 2 * previous_time + add_seconds:
                     batchSize //= 2
@@ -409,10 +627,34 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
             self.prediction_optimal_batchsize = batchSize
         return batchSize
 
+    def add_safe_globals(self):
+        try:
+            # If torch is new enough to recognize this command then the command is necessary, at
+            # least for torch.load().
+            torch.serialization.add_safe_globals(
+                [
+                    _BayesianPatchTorchModel,
+                    _BayesianVectorTorchModel,
+                    _VectorTorchModel,
+                    torch.nn.Conv2d,
+                    torch.nn.functional.log_softmax,
+                    torch.nn.functional.max_pool2d,
+                    torch.nn.functional.nll_loss,
+                    torch.nn.functional.relu,
+                    torch.nn.functional.softmax,
+                    torch.nn.Linear,
+                    torch.nn.Module,
+                ],
+            )
+        except Exception:
+            pass
+
     def loadModel(self, modelPath):
+        self.add_safe_globals()
         model = torch.load(modelPath)
         model.eval()
         return model
 
     def saveModel(self, model, modelPath):
+        self.add_safe_globals()
         torch.save(model, modelPath)
