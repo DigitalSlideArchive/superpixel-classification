@@ -28,6 +28,9 @@ tensorflow = [
     "keras",
 ]
 torch = [
-    "torch==1.13.1+cu117",
+    "torch",
+    "torchvision",
     "batchbald_redux",
+    "huggingface_hub",
+    "timm",
 ]

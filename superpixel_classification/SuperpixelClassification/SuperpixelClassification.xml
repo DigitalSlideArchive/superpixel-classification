@@ -163,6 +163,15 @@
       <element>negative_entropy</element>
       <element>batchbald</element>
     </string-enumeration>
+    <string-enumeration>
+      <name>feature</name>
+      <label>Feature Shape</label>
+      <description>Whether a feature is superpixel image data or a foundation model vector</description>
+      <longflag>feature</longflag>
+      <default>image</default>
+      <element>image</element>
+      <element>vector</element>
+    </string-enumeration>
   </parameters>
   <parameters advanced="true">
     <label>Girder API URL and Key</label>
