@@ -61,7 +61,7 @@
     <description>Superpixel parameters</description>
     <boolean>
       <name>gensuperpixels</name>
-      <longflag>generate-superpxiels</longflag>
+      <longflag>generate-superpixels</longflag>
       <description>If an image does not have an annotation with superpixels, generate one</description>
       <label>Generate superpixels</label>
       <default>true</default>
