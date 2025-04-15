@@ -1,3 +1,5 @@
+**/tmp*
+test_data
 .ruff_cache
 .tox
 *.egg-info
