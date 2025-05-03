@@ -428,11 +428,7 @@ class SuperpixelClassificationBase:
         futures = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
             for item, _, elem in itemsAndAnnot:
-                bbox = elem['user']['bbox']
-                hashval = repr(dict(
-                    itemId=item['_id'], bbox=[int(v) for v in bbox], patchSize=patchSize))
-                hashval = hashlib.new('sha256', hashval.encode()).hexdigest()
-                fileName = 'feature-%s.h5' % (hashval)
+                fileName = '%s.feature.h5' % (item['name'])
                 found = False
                 for existing in gc.listItem(featureFolderId, name=fileName):
                     results[item['_id']] = next(gc.listFile(existing['_id'], limit=1))
