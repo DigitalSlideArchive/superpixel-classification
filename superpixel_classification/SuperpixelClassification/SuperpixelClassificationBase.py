@@ -203,7 +203,7 @@ class SuperpixelClassificationBase:
             print('Create superpixels for %s' % item['name'])
             imagePath = os.path.join(tempdir, item['name'])
             gc.downloadFile(item['largeImage']['fileId'], imagePath)
-            outImagePath = os.path.join(tempdir, f'{item['name']}.pixelmap.tiff')
+            outImagePath = os.path.join(tempdir, '%s.pixelmap.tiff' % item['name'])
             outAnnotationPath = os.path.join(tempdir, '%s.anot' % annotationName)
 
             if True:
