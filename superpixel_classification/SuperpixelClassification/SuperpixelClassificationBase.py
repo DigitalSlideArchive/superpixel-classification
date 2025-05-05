@@ -425,18 +425,19 @@ class SuperpixelClassificationBase:
         prog.items([item for item, _, _ in itemsAndAnnot])
         results = {}
         futures = []
+        featureFiles = list(gc.listFile(featureFolderId))
         with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
             for item, _, elem in itemsAndAnnot:
-                fileName = '%s.feature.h5' % (item['name'])
-                found = False
-                for existing in gc.listItem(featureFolderId, name=fileName):
-                    results[item['_id']] = next(gc.listFile(existing['_id'], limit=1))
-                    found = True
-                    break
-                if not found:
+                match = [
+                    f for f in featureFiles if
+                    re.match('^%s.*[.]feature.h5$' % re.escape(item['name']), f)
+                ]
+                if len(match):
+                    results[item['_id']] = match[0][0]
+                else:
                     futures.append((item, executor.submit(
-                        self.createFeaturesForItem, gc, item, elem, featureFolderId, fileName,
-                        patchSize, prog)))
+                        self.createFeaturesForItem, gc, item, elem, featureFolderId,
+                        '%s.feature.h5' % (item['name']), patchSize, prog)))
         for item, future in futures:
             file = future.result()
             try:
