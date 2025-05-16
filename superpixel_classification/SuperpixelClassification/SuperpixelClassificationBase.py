@@ -1,6 +1,7 @@
 import argparse
 import concurrent.futures
 import copy
+import hashlib
 import json
 import os
 import pickle
@@ -434,10 +435,18 @@ class SuperpixelClassificationBase:
                 ]
                 if len(match):
                     results[item['_id']] = match[0][0]
-                else:
-                    futures.append((item, executor.submit(
-                        self.createFeaturesForItem, gc, item, elem, featureFolderId,
-                        '%s.feature.h5' % (item['name']), patchSize, prog)))
+                else:  # fallback to hash-based naming - generate features if necessary
+                    bbox = elem['user']['bbox']
+                    hashval = repr(dict(
+                        itemId=item['_id'], bbox=[int(v) for v in bbox], patchSize=patchSize))
+                    hashval = hashlib.new('sha256', hashval.encode()).hexdigest()
+                    fileName = 'feature-%s.h5' % (hashval)
+                    if fileName in featureFiles:
+                        results[item['_id']] = fileName
+                    else:
+                        futures.append((item, executor.submit(
+                            self.createFeaturesForItem, gc, item, elem, featureFolderId,
+                            '%s.feature.h5' % (item['name']), patchSize, prog)))
         for item, future in futures:
             file = future.result()
             try:
