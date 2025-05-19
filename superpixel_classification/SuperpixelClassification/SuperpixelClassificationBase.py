@@ -426,23 +426,26 @@ class SuperpixelClassificationBase:
         prog.items([item for item, _, _ in itemsAndAnnot])
         results = {}
         futures = []
-        featureFiles = list(gc.listFile(featureFolderId))
+        featureFiles = [
+            f for item in gc.listItem(featureFolderId) for f in gc.listFile(item['_id'])
+        ]
         with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
             for item, _, elem in itemsAndAnnot:
                 match = [
                     f for f in featureFiles if
-                    re.match('^%s.*[.]feature.h5$' % re.escape(item['name']), f)
+                    re.match('^%s.*[.]feature.h5$' % re.escape(item['name']), f['name'])
                 ]
                 if len(match):
-                    results[item['_id']] = match[0][0]
+                    results[item['_id']] = match[0]
                 else:  # fallback to hash-based naming - generate features if necessary
                     bbox = elem['user']['bbox']
                     hashval = repr(dict(
                         itemId=item['_id'], bbox=[int(v) for v in bbox], patchSize=patchSize))
                     hashval = hashlib.new('sha256', hashval.encode()).hexdigest()
                     fileName = 'feature-%s.h5' % (hashval)
-                    if fileName in featureFiles:
-                        results[item['_id']] = fileName
+                    match = [f for f in featureFiles if f['name'] == fileName]
+                    if len(match):
+                        results[item['_id']] = match[0]
                     else:
                         futures.append((item, executor.submit(
                             self.createFeaturesForItem, gc, item, elem, featureFolderId,
