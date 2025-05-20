@@ -204,7 +204,7 @@ class SuperpixelClassificationBase:
             print('Create superpixels for %s' % item['name'])
             imagePath = os.path.join(tempdir, item['name'])
             gc.downloadFile(item['largeImage']['fileId'], imagePath)
-            outImagePath = os.path.join(tempdir, 'superpixel.tiff')
+            outImagePath = os.path.join(tempdir, '%s.pixelmap.tiff' % item['name'])
             outAnnotationPath = os.path.join(tempdir, '%s.anot' % annotationName)
 
             if True:
@@ -426,22 +426,30 @@ class SuperpixelClassificationBase:
         prog.items([item for item, _, _ in itemsAndAnnot])
         results = {}
         futures = []
+        featureFiles = [
+            f for item in gc.listItem(featureFolderId) for f in gc.listFile(item['_id'])
+        ]
         with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as executor:
             for item, _, elem in itemsAndAnnot:
-                bbox = elem['user']['bbox']
-                hashval = repr(dict(
-                    itemId=item['_id'], bbox=[int(v) for v in bbox], patchSize=patchSize))
-                hashval = hashlib.new('sha256', hashval.encode()).hexdigest()
-                fileName = 'feature-%s.h5' % (hashval)
-                found = False
-                for existing in gc.listItem(featureFolderId, name=fileName):
-                    results[item['_id']] = next(gc.listFile(existing['_id'], limit=1))
-                    found = True
-                    break
-                if not found:
-                    futures.append((item, executor.submit(
-                        self.createFeaturesForItem, gc, item, elem, featureFolderId, fileName,
-                        patchSize, prog)))
+                match = [
+                    f for f in featureFiles if
+                    re.match('^%s.*[.]feature.h5$' % re.escape(item['name']), f['name'])
+                ]
+                if len(match):
+                    results[item['_id']] = match[0]
+                else:  # fallback to hash-based naming - generate features if necessary
+                    bbox = elem['user']['bbox']
+                    hashval = repr(dict(
+                        itemId=item['_id'], bbox=[int(v) for v in bbox], patchSize=patchSize))
+                    hashval = hashlib.new('sha256', hashval.encode()).hexdigest()
+                    fileName = 'feature-%s.h5' % (hashval)
+                    match = [f for f in featureFiles if f['name'] == fileName]
+                    if len(match):
+                        results[item['_id']] = match[0]
+                    else:
+                        futures.append((item, executor.submit(
+                            self.createFeaturesForItem, gc, item, elem, featureFolderId,
+                            '%s.feature.h5' % (item['name']), patchSize, prog)))
         for item, future in futures:
             file = future.result()
             try:
