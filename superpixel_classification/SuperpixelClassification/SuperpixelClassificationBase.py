@@ -398,7 +398,7 @@ class SuperpixelClassificationBase:
                         if mask.shape[2] == 4:
                             mask = mask[:, :, :-1]
                         maskvals = [[val % 256, val // 256 % 256, val // 65536 % 256]
-                                    for val in [idx * 2, idx * 2 + 1]]
+                                    for val in [(i + 1) * 2, (i + 1) * 2 + 1]]
                         patch_list.append(patch)
                         mask_list.append(mask)
                         maskvals_list.append(maskvals)
