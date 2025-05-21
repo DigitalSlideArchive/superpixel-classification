@@ -66,12 +66,15 @@ class _BayesianPatchTorchModel(bbald.consistent_mc_dropout.BayesianModule):
     # A Bayesian model that takes patches (2-dimensional shape) rather than vectors
     # (1-dimensional shape) as input.  It is useful when feature != 'vector' and
     # SuperpixelClassificationBase.certainty == 'batchbald'.
-    def __init__(self, num_classes: int) -> None:
+    def __init__(self, num_classes: int, device : torch.device = None) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        self.device: str = torch.device(
-            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
-        )
+        if not device:
+            self.device : torch.device = torch.device(
+                ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
+            )
+        else:
+            self.device : torch.device = device
         # print(f'Initial model.device = {self.device}')
         super(_BayesianPatchTorchModel, self).__init__()
 
@@ -137,7 +140,7 @@ class _VectorTorchModel(torch.nn.Module):
     def __init__(self, input_dim: int, num_classes: int) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        self.device: str = torch.device(
+        self.device: torch.device = torch.device(
             ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
         )
         # print(f'Initial model.device = {self.device}')
