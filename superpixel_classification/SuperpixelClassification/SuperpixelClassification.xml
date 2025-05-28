@@ -100,6 +100,13 @@
       <label>Train model</label>
       <default>true</default>
     </boolean>
+    <boolean>
+      <name>useCuda</name>
+      <longflag>usecuda</longflag>
+      <description>Whether or not to use GPU/cuda (true) or cpu (false).</description>
+      <label>Use CUDA</label>
+      <default>true</default>
+    </boolean>
     <integer>
       <name>batchSize</name>
       <longflag>batchsize</longflag>

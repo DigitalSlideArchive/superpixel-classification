@@ -66,12 +66,10 @@ class _BayesianPatchTorchModel(bbald.consistent_mc_dropout.BayesianModule):
     # A Bayesian model that takes patches (2-dimensional shape) rather than vectors
     # (1-dimensional shape) as input.  It is useful when feature != 'vector' and
     # SuperpixelClassificationBase.certainty == 'batchbald'.
-    def __init__(self, num_classes: int) -> None:
+    def __init__(self, num_classes: int, device: torch.device) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        self.device: str = torch.device(
-            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
-        )
+        self.device : torch.device = device
         # print(f'Initial model.device = {self.device}')
         super(_BayesianPatchTorchModel, self).__init__()
 
@@ -311,7 +309,10 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         prog: ProgressHelper,
         tempdir: str,
         trainingSplit: float,
+        cuda : bool,
     ):
+        device = torch.device("cuda" if cuda else "cpu")
+        print(f"Using device: {device}")
         # make model
         num_classes: int = len(record['labels'])
         model: torch.nn.Module
@@ -507,7 +508,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         return history
 
     def predictLabelsForItemDetails(
-        self, batchSize: int, ds_h5, item, model: torch.nn.Module, prog: ProgressHelper,
+        self, batchSize: int, ds_h5, item, model: torch.nn.Module, use_cuda : bool, prog: ProgressHelper,
     ):
         # print(f'Torch predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         num_superpixels: int = ds_h5.shape[0]
@@ -528,6 +529,9 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
             )
             if self.certainty == 'batchbald'
             else dict(num_superpixels=num_superpixels, num_classes=num_classes)
+        # also set on model.device, ideally
+        #device = torch.device("cuda" if use_cuda else "cpu")
+
         )
         for cb in callbacks:
             cb.on_predict_begin(logs=logs)
