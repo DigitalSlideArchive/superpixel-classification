@@ -663,6 +663,8 @@ class SuperpixelClassificationBase:
                 epsilon = 1e-50
                 predictions = np.log(catWeights + epsilon)
             cats = np.argmax(catWeights, axis=-1)
+            # 0 means we didn't make a prediction, so increment by one
+            #cats[indices] += 1
             conf = catWeights[list(all_indices), cats[np.arange(cats.shape[0])]]
             print_fully('cats', cats)
             print_fully('conf', conf)
