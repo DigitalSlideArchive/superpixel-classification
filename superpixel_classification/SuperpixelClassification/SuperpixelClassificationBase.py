@@ -485,17 +485,20 @@ class SuperpixelClassificationBase:
             item['name'], annotrec['annotation']['name'], annotrec['_id'], annotrec['_version']))
         featurePath = os.path.join(record['tempdir'], feature['name'])
         gc.downloadFile(feature['_id'], featurePath)
+        print(f"Downloaded '{feature['_id']}' to '{featurePath}'")
         with h5py.File(featurePath, 'r') as ffptr:
             fds = ffptr['images']
             if 'used_indices' in ffptr:
                 indices = ffptr['used_indices']
             else:
                 indices = range(len(elem['values']))
+            skipped_excluded = 0
             for i,idx in enumerate(indices):
                 labelnum = elem['values'][idx]
                 if 0 < labelnum < len(elem['categories']):
                     labelname = elem['categories'][labelnum]['label']
                     if labelname in excludeLabelList:
+                        skipped_excluded += 1
                         continue
                     if labelname not in record['groups']:
                         record['groups'][labelname] = elem['categories'][labelnum]
@@ -523,6 +526,7 @@ class SuperpixelClassificationBase:
                     record['lastlog'] = time.time()
                     print(record['ds'].shape, record['counts'],
                           '%5.3f' % (time.time() - record['starttime']))
+            print(f"Skipped {skipped_excluded} samples with labels that were excluded")
 
     def trainModel(self, gc, annotationName, itemsAndAnnot, features, modelFolderId,
                    batchSize, epochs, trainingSplit, randomInput, labelList,
@@ -579,11 +583,11 @@ class SuperpixelClassificationBase:
             for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     modelFile = gc.uploadFileToFolder(modelFolderId, modelPath)
-            print('Saved model')
+            print(f'Saved model to {modelFolderId}')
             for attempt in tenacity.Retrying(stop=tenacity.stop_after_attempt(self.uploadRetries)):
                 with attempt:
                     modTrainingFile = gc.uploadFileToFolder(modelFolderId, modTrainingPath)
-            print('Saved modTraining')
+            print(f'Saved modTraining to {modelFolderId}')
             return modelFile, modTrainingFile
 
     def predictLabelsForItem(self, gc, annotationName, tempdir, model, item,
@@ -839,7 +843,7 @@ class SuperpixelClassificationBase:
                     modelFile = next(gc.listFile(item['_id'], limit=1))
                     break
             if not modelFile:
-                print('No model file found')
+                print(f'No model file found in {modelFolderId}')
                 return
             print(modelFile['name'], item)
             modelPath = os.path.join(tempdir, modelFile['name'])
@@ -852,7 +856,7 @@ class SuperpixelClassificationBase:
                     modTrainingFile = next(gc.listFile(item['_id'], limit=1))
                     break
             if not modTrainingFile:
-                print('No modTraining file found')
+                print(f'No modTraining file found in {modelFolderId}')
                 return
             print(modTrainingFile['name'], item)
             modTrainingPath = os.path.join(tempdir, modTrainingFile['name'])
@@ -883,7 +887,7 @@ class SuperpixelClassificationBase:
                 if item['_id'] not in features:
                     continue
                 self.predictLabelsForItem(
-                    gc, annotationName, annotationFolderId, tempdir, model, item, annotrec, elem,
+                    gc, annotationName, tempdir, model, item, annotrec, elem,
                     features.get(item['_id']), curEpoch, userId, labels, groups, saliencyMaps,
                     radius, magnification, certainty, batchSize, prog)
             prog.progress(1)
@@ -912,18 +916,23 @@ class SuperpixelClassificationBase:
                     args.annotationDir, args.numWorkers, prog)
 
             itemsAndAnnot = self.getItemsAndAnnotations(gc, args.images, args.annotationName)
+            print("Creating features...")
             features = self.createFeatures(
                 gc, args.images, args.annotationName, itemsAndAnnot, args.features, args.patchSize,
                 args.numWorkers, prog, args.cutoff)
+            print("Done creating features...")
 
             if args.train:
                 print("Training...")
                 self.trainModel(
                     gc, args.annotationName, itemsAndAnnot, features, args.modeldir, args.batchSize,
-                    args.epochs, args.split, args.randominput, args.labels, args.exclude, prog)
+                    args.epochs, args.split, args.randominput, args.labels, args.exclude, args.useCuda, prog)
+                print("Done training...")
 
             print("Predicting labels...")
             self.predictLabels(
                 gc, args.images, args.annotationName, itemsAndAnnot, features, args.modeldir, args.annotationDir,
                 args.heatmaps, args.radius, args.magnification, args.certainty, args.batchSize,
                 prog)
+            print("Done predicting labels...")
+        print("Done, exiting")

@@ -351,6 +351,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         val_ds: torch.utils.data.TensorDataset
         train_dl: torch.utils.data.DataLoader
         val_dl: torch.utils.data.DataLoader
+        prog.message('Loading features for model training')
         train_arg1 = (
             torch.from_numpy(record['ds'][train_indices].transpose((0, 3, 2, 1)))
             if self.feature_is_image
