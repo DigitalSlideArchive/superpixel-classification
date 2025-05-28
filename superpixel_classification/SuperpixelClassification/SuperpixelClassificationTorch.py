@@ -171,6 +171,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         val_ds: torch.utils.data.TensorDataset
         train_dl: torch.utils.data.DataLoader
         val_dl: torch.utils.data.DataLoader
+        prog.message('Loading features for model training')
         train_arg1 = torch.from_numpy(record['ds'][train_indices].transpose((0, 3, 2, 1)))
         train_arg2 = torch.from_numpy(record['labelds'][train_indices])
         val_arg1 = torch.from_numpy(record['ds'][val_indices].transpose((0, 3, 2, 1)))
