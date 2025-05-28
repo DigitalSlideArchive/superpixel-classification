@@ -886,19 +886,21 @@ class SuperpixelClassificationBase:
                     radius, magnification, certainty, batchSize, prog)
             prog.progress(1)
 
-    def main(self, args):
+    def main(self, args, gc = None):
         self.feature_is_image = args.feature != 'vector'
         self.certainty = args.certainty
 
         print('\n>> CLI Parameters ...\n')
         pprint.pprint(vars(args))
 
-        gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
-        gc.token = args.girderToken
-        gc.authenticate('admin', 'password')
-        # dummy check to make sure we have access to server
-        if not [x for x in list(gc.listCollection()) if x['name'] == 'Active Learning']:
-            raise Exception("Unable to authenticate with girder")
+        if gc is None:
+            gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
+            gc.token = args.girderToken
+            gc.authenticate('admin', 'password')
+
+            # check to make sure we have access to server
+            if not [x for x in list(gc.listCollection()) if x['name'] == 'Active Learning']:
+                raise Exception("Unable to authenticate with girder")
 
         with ProgressHelper(
                 'Superpixel Classification', 'Superpixel classification', args.progress) as prog:
