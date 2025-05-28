@@ -530,7 +530,7 @@ class SuperpixelClassificationBase:
 
     def trainModel(self, gc, annotationName, itemsAndAnnot, features, modelFolderId,
                    batchSize, epochs, trainingSplit, randomInput, labelList,
-                   excludeLabelList, prog):
+                   excludeLabelList, use_cuda, prog):
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
             trainingPath = os.path.join(tempdir, 'training.h5')
             with h5py.File(trainingPath, 'w') as fptr:
@@ -568,7 +568,7 @@ class SuperpixelClassificationBase:
                 prog.progress(0)
                 history, modelPath = self.trainModelDetails(
                     record, annotationName, batchSize, epochs, itemsAndAnnot, prog, tempdir,
-                    trainingSplit)
+                    trainingSplit, use_cuda)
 
                 modTrainingPath = os.path.join(tempdir, '%s ModTraining Epoch %d.h5' % (
                     annotationName, self.getCurrentEpoch(itemsAndAnnot)))
@@ -592,7 +592,7 @@ class SuperpixelClassificationBase:
 
     def predictLabelsForItem(self, gc, annotationName, tempdir, model, item,
                              annotrec, elem, feature, curEpoch, userId, labels, groups,
-                             makeHeatmaps, radius, magnification, certainty, batchSize, prog):
+                             makeHeatmaps, radius, magnification, certainty, batchSize, use_cuda, prog):
         import al_bench.factory
 
         print('Predicting %s' % (item['name']))
@@ -827,7 +827,7 @@ class SuperpixelClassificationBase:
 
     def predictLabels(self, gc, folderId, annotationName, itemsAndAnnot, features, modelFolderId,
                       annotationFolderId, saliencyMaps, radius, magnification,
-                      certainty, batchSize, prog):
+                      certainty, batchSize, use_cuda, prog):
         #itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
         curEpoch = self.getCurrentEpoch(itemsAndAnnot)
         folder = gc.getFolder(folderId)
@@ -889,7 +889,7 @@ class SuperpixelClassificationBase:
                 self.predictLabelsForItem(
                     gc, annotationName, tempdir, model, item, annotrec, elem,
                     features.get(item['_id']), curEpoch, userId, labels, groups, saliencyMaps,
-                    radius, magnification, certainty, batchSize, prog)
+                    radius, magnification, certainty, batchSize, use_cuda, prog)
             prog.progress(1)
 
     def main(self, args, gc = None):
@@ -932,7 +932,7 @@ class SuperpixelClassificationBase:
             print("Predicting labels...")
             self.predictLabels(
                 gc, args.images, args.annotationName, itemsAndAnnot, features, args.modeldir, args.annotationDir,
-                args.heatmaps, args.radius, args.magnification, args.certainty, args.batchSize,
+                args.heatmaps, args.radius, args.magnification, args.certainty, args.batchSize, args.useCuda,
                 prog)
             print("Done predicting labels...")
         print("Done, exiting")

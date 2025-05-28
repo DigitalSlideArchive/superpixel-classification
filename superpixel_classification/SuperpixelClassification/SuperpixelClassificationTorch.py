@@ -66,15 +66,10 @@ class _BayesianPatchTorchModel(bbald.consistent_mc_dropout.BayesianModule):
     # A Bayesian model that takes patches (2-dimensional shape) rather than vectors
     # (1-dimensional shape) as input.  It is useful when feature != 'vector' and
     # SuperpixelClassificationBase.certainty == 'batchbald'.
-    def __init__(self, num_classes: int, device : torch.device = None) -> None:
+    def __init__(self, num_classes: int, device : torch.device) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        if not device:
-            self.device : torch.device = torch.device(
-                ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
-            )
-        else:
-            self.device : torch.device = device
+        self.device : torch.device = device
         # print(f'Initial model.device = {self.device}')
         super(_BayesianPatchTorchModel, self).__init__()
 
@@ -137,18 +132,16 @@ class _VectorTorchModel(torch.nn.Module):
     # (2-dimensional shape) as input.  It is useful when feature == 'vector' and
     # SuperpixelClassificationBase.certainty != 'batchbald'.
 
-    def __init__(self, input_dim: int, num_classes: int) -> None:
+    def __init__(self, input_dim: int, num_classes: int, device : torch.device) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        self.device: torch.device = torch.device(
-            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
-        )
+        self.device: torch.device = device
         # print(f'Initial model.device = {self.device}')
         super(_VectorTorchModel, self).__init__()
 
         self.input_dim: int = input_dim
         self.num_classes: int = num_classes
-        self.fc: torch.Module = torch.nn.Linear(input_dim, num_classes)
+        self.fc: torch.Linear = torch.nn.Linear(input_dim, num_classes)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # TODO: Is torch.mul appropriate here?
@@ -164,20 +157,18 @@ class _BayesianVectorTorchModel(bbald.consistent_mc_dropout.BayesianModule):
     # (2-dimensional shape) as input.  It is useful when feature == 'vector' and
     # SuperpixelClassificationBase.certainty == 'batchbald'.
 
-    def __init__(self, input_dim: int, num_classes: int) -> None:
+    def __init__(self, input_dim: int, num_classes: int, device : torch.device) -> None:
         # Set `self.device` as early as possible so that other code does not lock out
         # what we want.
-        self.device: str = torch.device(
-            ('cuda' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu'),
-        )
+        self.device = device
         # print(f'Initial model.device = {self.device}')
         super(_BayesianVectorTorchModel, self).__init__()
 
         self.input_dim: int = input_dim
         self.num_classes: int = num_classes
         self.bayesian_samples: int = 12
-        self.fc: torch.Module = torch.nn.Linear(input_dim, num_classes)
-        self.fc_drop: torch.Module = bbald.consistent_mc_dropout.ConsistentMCDropout()
+        self.fc: torch.Linear = torch.nn.Linear(input_dim, num_classes)
+        self.fc_drop: torch.ConsistentMCDropout = bbald.consistent_mc_dropout.ConsistentMCDropout()
 
     def mc_forward_impl(self, input: torch.Tensor) -> torch.Tensor:
         # TODO: Is torch.mul appropriate here?
@@ -314,14 +305,17 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         prog: ProgressHelper,
         tempdir: str,
         trainingSplit: float,
+        cuda : bool,
     ):
+        device = torch.device("cuda" if cuda else "cpu")
+        print(f"Using device: {device}")
         # make model
         num_classes: int = len(record['labels'])
         model: torch.nn.Module
         if self.feature_is_image:
             # Feature is patch
             if self.certainty == 'batchbald':
-                model = _BayesianPatchTorchModel(num_classes)
+                model = _BayesianPatchTorchModel(num_classes, device)
             else:
                 mesg = 'Expected torch model for input of type image to be Bayesian'
                 raise ValueError(mesg)
@@ -329,9 +323,9 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
             # Feature is vector
             input_dim: int = record['ds'].shape[1]
             if self.certainty == 'batchbald':
-                model = _BayesianVectorTorchModel(input_dim, num_classes)
+                model = _BayesianVectorTorchModel(input_dim, num_classes, device)
             else:
-                model = _VectorTorchModel(input_dim, num_classes)
+                model = _VectorTorchModel(input_dim, num_classes, device)
         model.to(model.device)
 
         # print(f'Torch trainModelDetails(batchSize={batchSize}, ...)')
@@ -511,7 +505,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         return history
 
     def predictLabelsForItemDetails(
-        self, batchSize: int, ds_h5, item, model: torch.nn.Module, prog: ProgressHelper,
+        self, batchSize: int, ds_h5, indices, item, model: torch.nn.Module, use_cuda : bool, prog: ProgressHelper,
     ):
         # print(f'Torch predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         num_superpixels: int = ds_h5.shape[0]
@@ -520,6 +514,9 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         # print(f'{bayesian_samples = }')
         num_classes: int = model.num_classes
         # print(f'{num_classes = }')
+
+        # also set on model.device, ideally
+        #device = torch.device("cuda" if use_cuda else "cpu")
 
         callbacks = [
             _LogTorchProgress(prog, 1 + (num_superpixels - 1) // batchSize, 0.05, 0.35, item),
