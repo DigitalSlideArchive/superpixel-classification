@@ -919,7 +919,7 @@ class SuperpixelClassificationBase:
             if args.train:
                 print("Training...")
                 self.trainModel(
-                    gc, args.images, args.annotationName, itemsAndAnnot, features, args.modeldir, args.batchSize,
+                    gc, args.annotationName, itemsAndAnnot, features, args.modeldir, args.batchSize,
                     args.epochs, args.split, args.randominput, args.labels, args.exclude, prog)
 
             print("Predicting labels...")
