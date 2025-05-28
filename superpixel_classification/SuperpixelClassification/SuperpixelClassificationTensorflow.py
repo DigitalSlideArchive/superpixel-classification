@@ -3,6 +3,7 @@ import time
 from typing import Optional
 
 import h5py
+import numpy as np
 import tensorflow as tf
 from SuperpixelClassificationBase import SuperpixelClassificationBase
 
