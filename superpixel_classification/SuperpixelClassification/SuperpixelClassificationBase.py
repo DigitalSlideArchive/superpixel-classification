@@ -351,7 +351,11 @@ class SuperpixelClassificationBase:
 
             num_values = len(elem['values'])
             labeled_samples = set([i for i, x in enumerate(elem['values']) if x > 0])
-            unlabeled_samples = [i for i, x in enumerate(elem['values']) if x == 0]
+            # background is used if we have a bounding box of 1 pixel in top left corner that is unlabeled. We do not want to extract features for that
+            has_background = elem['user']['bbox'][:4] == [0,0,1,1]
+            start_index = 1 if has_background else 0
+            unlabeled_samples = [i for i, x in enumerate(elem['values'][start_index:], start=start_index) if x == 0]
+
             if num_values - len(labeled_samples) > cutoff:
                 # only select a subset of unlabeled samples, i.e., prune the feature list
                 random.shuffle(unlabeled_samples)
