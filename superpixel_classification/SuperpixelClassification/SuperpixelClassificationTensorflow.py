@@ -35,33 +35,56 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
     def __init__(self):
         self.training_optimal_batchsize: Optional[int] = None
         self.prediction_optimal_batchsize: Optional[int] = None
+        self.use_cuda = False
 
     def trainModelDetails(self, record, annotationName, batchSize, epochs, itemsAndAnnot, prog,
-                          tempdir, trainingSplit):
-        # print(f'Tensorflow trainModelDetails(batchSize={batchSize}, ...)')
-        # make model
-        num_classes = len(record['labels'])
-        model = tf.keras.Sequential([
-            tf.keras.layers.Rescaling(1.0 / 255),
-            tf.keras.layers.Conv2D(16, 3, padding='same', activation='relu'),
-            tf.keras.layers.MaxPooling2D(),
-            tf.keras.layers.Conv2D(32, 3, padding='same', activation='relu'),
-            tf.keras.layers.MaxPooling2D(),
-            tf.keras.layers.Conv2D(64, 3, padding='same', activation='relu'),
-            tf.keras.layers.MaxPooling2D(),
-            tf.keras.layers.Flatten(),
-            # tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dense(num_classes)])
-        prog.progress(0.2)
-        model.compile(optimizer='adam',
-                      loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                      metrics=['accuracy'])
+                          tempdir, trainingSplit, use_cuda):
+        self.use_cuda = use_cuda
+
+        # Enable GPU memory growth globally to avoid precondition errors
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus and self.use_cuda:
+            try:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError as e:
+                print(f"Could not set memory growth: {e}")
+        if not self.use_cuda:
+            tf.config.set_visible_devices([], 'GPU')
+        device = "gpu" if use_cuda else "cpu"
+        print(f"Using device: {device}")
+
+        # Dataset preparation (outside strategy scope)
+        ds_h5 = record['ds']
+        labelds_h5 = record['labelds']
+        # Fully load to memory and break h5py reference
+        ds_numpy = np.array(ds_h5[:])
+        labelds_numpy = np.array(labelds_h5[:])
+
+        strategy = tf.distribute.MirroredStrategy()
+        with strategy.scope():
+            num_classes = len(record['labels'])
+            model = tf.keras.Sequential([
+                tf.keras.layers.Rescaling(1.0 / 255),
+                tf.keras.layers.Conv2D(16, 3, padding='same', activation='relu'),
+                tf.keras.layers.MaxPooling2D(),
+                tf.keras.layers.Conv2D(32, 3, padding='same', activation='relu'),
+                tf.keras.layers.MaxPooling2D(),
+                tf.keras.layers.Conv2D(64, 3, padding='same', activation='relu'),
+                tf.keras.layers.MaxPooling2D(),
+                tf.keras.layers.Flatten(),
+                tf.keras.layers.Dense(128, activation='relu'),
+                tf.keras.layers.Dense(num_classes)])
+            prog.progress(0.2)
+            model.compile(optimizer='adam',
+                          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                          metrics=['accuracy'])
+
         prog.progress(0.7)
-        # generate split
-        full_ds = tf.data.Dataset.from_tensor_slices((record['ds'], record['labelds']))
-        full_ds = full_ds.shuffle(1000)  # add seed=123 ?
-        count = len(full_ds)
+        # generate split using numpy arrays
+        full_ds = tf.data.Dataset.from_tensor_slices((ds_numpy, labelds_numpy))
+        full_ds = full_ds.shuffle(1000)
+        count = len(ds_numpy)
         train_size = int(count * trainingSplit)
         if batchSize < 1:
             batchSize = self.findOptimalBatchSize(model, full_ds, training=True)
@@ -85,24 +108,53 @@ class SuperpixelClassificationTensorflow(SuperpixelClassificationBase):
         self.saveModel(model, modelPath)
         return history, modelPath
 
+    def _get_device(self, use_cuda):
+        if tf.config.list_physical_devices('GPU') and use_cuda:
+            return '/GPU:0'
+        return '/CPU:0'
+
     def predictLabelsForItemDetails(
-        self, batchSize, ds: h5py._hl.dataset.Dataset, item, model, prog,
+            self, batchSize, ds: h5py._hl.dataset.Dataset, indices, item, model, use_cuda, prog,
     ):
-        # print(f'Tensorflow predictLabelsForItemDetails(batchSize={batchSize}, ...)')
         if batchSize < 1:
             batchSize = self.findOptimalBatchSize(
                 model, tf.data.Dataset.from_tensor_slices(ds), training=False,
             )
             print(f'Optimal batch size for prediction = {batchSize}')
-        predictions = model.predict(
-            ds,
-            batch_size=batchSize,
-            callbacks=[_LogTensorflowProgress(
-                prog, (ds.shape[0] + batchSize - 1) // batchSize, 0.05, 0.35, item)])
-        prog.item_progress(item, 0.4)
-        # softmax to scale to 0 to 1
-        catWeights = tf.nn.softmax(predictions)
-        return catWeights, predictions
+
+        device = self._get_device(use_cuda)
+        with tf.device(device):
+            # Create a dataset that pairs the data with their indices
+            dataset = tf.data.Dataset.from_tensor_slices((ds, indices))
+            dataset = dataset.batch(batchSize)
+        
+            # Initialize arrays to store results
+            all_predictions = []
+            all_cat_weights = []
+            all_indices = []
+        
+            # Iterate through batches manually to keep track of indices
+            for data, batch_indices in dataset:
+                batch_predictions = model.predict(
+                    data,
+                    batch_size=batchSize,
+                    verbose=0)  # Set verbose=0 to avoid multiple progress bars
+            
+                # Apply softmax to scale to 0 to 1
+                batch_cat_weights = tf.nn.softmax(batch_predictions)
+            
+                all_predictions.append(batch_predictions)
+                all_cat_weights.append(batch_cat_weights)
+                all_indices.append(batch_indices)
+            
+                prog.item_progress(item, 0.4)
+        
+            # Concatenate all results
+            predictions = tf.concat(all_predictions, axis=0)
+            catWeights = tf.concat(all_cat_weights, axis=0)
+            final_indices = tf.concat(all_indices, axis=0)
+        
+            return catWeights.numpy(), predictions.numpy(), final_indices.numpy().astype(np.int64)
 
     def findOptimalBatchSize(self, model, ds, training) -> int:
         if training and self.training_optimal_batchsize is not None:
