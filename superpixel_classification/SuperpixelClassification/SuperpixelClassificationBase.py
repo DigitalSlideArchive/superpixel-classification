@@ -332,7 +332,7 @@ class SuperpixelClassificationBase:
         )
         return feature_list
 
-    def createFeaturesForItem(self, gc, item, elem, featureFolderId, fileName, patchSize, prog):
+    def createFeaturesForItem(self, gc, item, elem, featureFolderId, fileName, patchSize, prog, cutoff):
         import large_image
 
         print('Create feature', fileName)
@@ -349,17 +349,31 @@ class SuperpixelClassificationBase:
             gc.downloadFile(maskItem['largeImage']['fileId'], maskPath)
             tsMask = large_image.open(maskPath)
 
+            num_values = len(elem['values'])
+            labeled_samples = set([i for i, x in enumerate(elem['values']) if x > 0])
+            unlabeled_samples = [i for i, x in enumerate(elem['values']) if x == 0]
+            if num_values - len(labeled_samples) > cutoff:
+                # only select a subset of unlabeled samples, i.e., prune the feature list
+                random.shuffle(unlabeled_samples)
+                unlabeled_samples = unlabeled_samples[:cutoff]
+            indices = list(sorted(list(labeled_samples) + unlabeled_samples))
+
             with h5py.File(filePath, 'w') as fptr:
                 batch_size = 1024  # TODO: Is this the best value?
-                for batch_start in range(0, len(elem['values']), batch_size):
-                    batch_list = elem['values'][batch_start: batch_start + batch_size]
+                total_size = len(indices)
+                for batch_start in range(0, total_size, batch_size):
+                    #batch_list = elem['values'][batch_start: batch_start + batch_size]
+                    batch_list = indices[batch_start: batch_start + batch_size]
                     patch_list = []
                     mask_list = []
                     maskvals_list = []
-                    for idx, _ in enumerate(batch_list, start=batch_start):
-                        prog.item_progress(item, 0.9 * idx / len(elem['values']))
-                        bbox = elem['user']['bbox'][idx * 4: idx * 4 + 4]
+
+                    for idx, i in enumerate(batch_list, start=batch_start):
+                        prog.item_progress(item, 0.9 * idx / total_size)
+                        bbox = elem['user']['bbox'][i * 4: i * 4 + 4]
                         # use masked superpixel
+                        if len(bbox) < 4:
+                            pass
                         patch = ts.getRegion(
                             region=dict(
                                 left=int(bbox[0]), top=int(bbox[1]),
@@ -384,7 +398,7 @@ class SuperpixelClassificationBase:
                         if mask.shape[2] == 4:
                             mask = mask[:, :, :-1]
                         maskvals = [[val % 256, val // 256 % 256, val // 65536 % 256]
-                                    for val in [idx * 2, idx * 2 + 1]]
+                                    for val in [(i + 1) * 2, (i + 1) * 2 + 1]]
                         patch_list.append(patch)
                         mask_list.append(mask)
                         maskvals_list.append(maskvals)
@@ -409,6 +423,8 @@ class SuperpixelClassificationBase:
                                              (time.time() - starttime)),
                                   item['name'])
                     del batch_list, patch_list, mask_list, maskvals_list, feature_list
+                used_indices_ds = fptr.create_dataset(
+                    'used_indices', data=np.array(indices), dtype='i')
                 print(ds.shape, len(elem['values']), '%5.3f' % (time.time() - starttime),
                       item['name'])
             prog.item_progress(item, 0.9)
@@ -418,9 +434,9 @@ class SuperpixelClassificationBase:
             prog.item_progress(item, 1)
             return file
 
-    def createFeatures(self, gc, folderId, annotationName, featureFolderId, patchSize, numWorkers,
-                       prog):
-        itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
+    def createFeatures(self, gc, folderId, annotationName, itemsAndAnnot, featureFolderId, patchSize, numWorkers,
+                       prog, cutoff):
+        # itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
         prog.message('Creating features')
         prog.progress(0)
         prog.items([item for item, _, _ in itemsAndAnnot])
@@ -449,7 +465,7 @@ class SuperpixelClassificationBase:
                     else:
                         futures.append((item, executor.submit(
                             self.createFeaturesForItem, gc, item, elem, featureFolderId,
-                            '%s.feature.h5' % (item['name']), patchSize, prog)))
+                            '%s.feature.h5' % (item['name']), patchSize, prog, cutoff)))
         for item, future in futures:
             file = future.result()
             try:
@@ -471,8 +487,13 @@ class SuperpixelClassificationBase:
         gc.downloadFile(feature['_id'], featurePath)
         with h5py.File(featurePath, 'r') as ffptr:
             fds = ffptr['images']
-            for idx, labelnum in enumerate(elem['values']):
-                if labelnum and labelnum < len(elem['categories']):
+            if 'used_indices' in ffptr:
+                indices = ffptr['used_indices']
+            else:
+                indices = range(len(elem['values']))
+            for i,idx in enumerate(indices):
+                labelnum = elem['values'][idx]
+                if 0 < labelnum < len(elem['categories']):
                     labelname = elem['categories'][labelnum]['label']
                     if labelname in excludeLabelList:
                         continue
@@ -483,7 +504,7 @@ class SuperpixelClassificationBase:
                     labelname = labelList[labelnum - 1]
                 else:
                     continue
-                patch = fds[idx]
+                patch = fds[i]
                 if not record['ds']:
                     record['ds'] = record['fptr'].create_dataset(
                         'images', (1,) + patch.shape, maxshape=(None,) + patch.shape,
@@ -503,10 +524,9 @@ class SuperpixelClassificationBase:
                     print(record['ds'].shape, record['counts'],
                           '%5.3f' % (time.time() - record['starttime']))
 
-    def trainModel(self, gc, folderId, annotationName, features, modelFolderId,
+    def trainModel(self, gc, annotationName, itemsAndAnnot, features, modelFolderId,
                    batchSize, epochs, trainingSplit, randomInput, labelList,
                    excludeLabelList, prog):
-        itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as tempdir:
             trainingPath = os.path.join(tempdir, 'training.h5')
             with h5py.File(trainingPath, 'w') as fptr:
@@ -534,7 +554,7 @@ class SuperpixelClassificationBase:
                 prog.progress(1)
                 if not record['ds']:
                     print('No labeled data')
-                    return
+                    return None, None
                 record['labelds'] = fptr.create_dataset(
                     'labels', (len(record['labelvals']),), dtype=int)
                 record['labelds'] = np.array(record['labelvals'], dtype=int)
@@ -566,7 +586,7 @@ class SuperpixelClassificationBase:
             print('Saved modTraining')
             return modelFile, modTrainingFile
 
-    def predictLabelsForItem(self, gc, annotationName, annotationFolderId, tempdir, model, item,
+    def predictLabelsForItem(self, gc, annotationName, tempdir, model, item,
                              annotrec, elem, feature, curEpoch, userId, labels, groups,
                              makeHeatmaps, radius, magnification, certainty, batchSize, prog):
         import al_bench.factory
@@ -579,6 +599,8 @@ class SuperpixelClassificationBase:
 
         # Figure out which samples are already labeled
         labeled_samples: NDArray[np.int_] = np.nonzero(np.array(elem['values']))
+        number_annotations = len(elem['values'])
+        tiny = np.finfo(np.float32).tiny
 
         print(f'{labeled_samples = }')
         print(f'certainty_type = {certainty!r}')
@@ -589,9 +611,17 @@ class SuperpixelClassificationBase:
         # In case we are computing batchbald
         compCertainty.set_batchbald_num_samples(16)
         compCertainty.set_batchbald_batch_size(100)
-        compCertainty.set_batchbald_excluded_samples(labeled_samples)
+        #compCertainty.set_batchbald_excluded_samples(labeled_samples)
 
         with h5py.File(featurePath, 'r') as ffptr:
+            if 'used_indices' in ffptr:
+                used_indices = set(list(ffptr['used_indices']))
+            else:
+                used_indices = set(range(number_annotations))
+            all_indices = set(range(number_annotations))
+            unused_indices = list(sorted(all_indices.difference(used_indices)))
+            compCertainty.set_batchbald_excluded_samples(np.array(unused_indices))
+
             prog.item_progress(item, 0)
             # Create predicted annotation
             annot = copy.deepcopy(annotrec)
@@ -600,21 +630,29 @@ class SuperpixelClassificationBase:
             annot['elements'][0]['categories'] = [groups[key] for key in labels]
             ds = ffptr['images']
             prog.item_progress(item, 0.05)
-            catWeights, predictions = self.predictLabelsForItemDetails(
-                batchSize, ds, item, model, prog)
-            catWeights = np.array(catWeights)
-            predictions = np.array(predictions)
+            _catWeights, _predictions, indices = self.predictLabelsForItemDetails(
+                batchSize, ds, np.array(list(used_indices), dtype=np.int64), item, model, use_cuda, prog)
+            # expand catWeights and predictions to be length of elem['values'] instead of just `cutoff` samples
+            # then copy in results from predictions
+            catWeights = np.zeros((number_annotations,) + _catWeights.shape[1:], dtype=np.float32 if str(_catWeights.dtype).endswith("32") else np.float64)
+            predictions = np.zeros((number_annotations,) + _predictions.shape[1:], dtype=np.float32 if str(_predictions.dtype).endswith("32") else np.float64)
+            for cw,p,idx in zip(_catWeights, _predictions, indices):
+                catWeights[idx] = cw
+                predictions[idx] = p
+                
             print_fully('predictions', predictions)
             prog.item_progress(item, 0.7)
             # compCertainty needs catWeights to have shape (num_superpixels,
             # bayesian_samples, num_classes) if 'batchbald' is selected, otherwise the
             # shape should be (num_superpixels, num_classes).
-            print_fully('catWeights', catWeights)
             # Ask compCertainty to compute certainties
-            cert = compCertainty.from_numpy_array(catWeights)
+            cert = compCertainty.from_numpy_array(catWeights + tiny)
+            print_fully('catWeights', catWeights)
+
             # After the call to compCertainty, those numbers that end up as values for
             # annot's keys 'values', 'confidence', 'categoryConfidence', and 'certainty'
             # should have shape (num_superpixels, num_classes).
+
             print_fully('cert', cert)
             scores = cert[certainty]['scores']
             print_fully('scores', scores)
@@ -625,14 +663,26 @@ class SuperpixelClassificationBase:
                 epsilon = 1e-50
                 predictions = np.log(catWeights + epsilon)
             cats = np.argmax(catWeights, axis=-1)
-            indices = np.arange(cats.shape[0])
-            conf = catWeights[indices, cats[indices]]
+            conf = catWeights[list(all_indices), cats[np.arange(cats.shape[0])]]
             print_fully('cats', cats)
             print_fully('conf', conf)
 
+            # give unused_indices the highest possible confidence so that they show up last in the active learning UI
+            # (because it sorts by confidence in descending order)
+            scores[unused_indices] = np.finfo(scores.dtype).max
+            # additionally, ensure that labels that are already labeled also end up last or late in the recommendations
+            # for the DSA UI, this prevents labeled samples from being shown again to the user
+            scores[labeled_samples] = np.finfo(scores.dtype).max
+
+            # additionally, ensure that labels that are already labeled also end up last or late in the recommendations
+            # for the DSA UI, this prevents labeled samples from being shown again to the user
+            scores[labeled_samples] = np.finfo(scores.dtype).max
+
             cats = cats.tolist()
             conf = conf.tolist()
-            # Should this be from predictions for from catWeights?!!!
+
+            # Should this be from predictions or from catWeights?!!!
+            predictions[np.isneginf(predictions)] = np.finfo(predictions.dtype).min
             catConf = predictions.tolist()
             scores = scores.tolist()
             annot['elements'][0]['values'] = cats
@@ -769,10 +819,10 @@ class SuperpixelClassificationBase:
                                           'fileId': item['largeImage']['fileId'],
                                           'userId': userId}))
 
-    def predictLabels(self, gc, folderId, annotationName, features, modelFolderId,
+    def predictLabels(self, gc, folderId, annotationName, itemsAndAnnot, features, modelFolderId,
                       annotationFolderId, saliencyMaps, radius, magnification,
                       certainty, batchSize, prog):
-        itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
+        #itemsAndAnnot = self.getItemsAndAnnotations(gc, folderId, annotationName)
         curEpoch = self.getCurrentEpoch(itemsAndAnnot)
         folder = gc.getFolder(folderId)
         userId = folder['creatorId']
@@ -836,15 +886,21 @@ class SuperpixelClassificationBase:
                     radius, magnification, certainty, batchSize, prog)
             prog.progress(1)
 
-    def main(self, args):
+    def main(self, args, gc = None):
         self.feature_is_image = args.feature != 'vector'
         self.certainty = args.certainty
 
         print('\n>> CLI Parameters ...\n')
         pprint.pprint(vars(args))
 
-        gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
-        gc.token = args.girderToken
+        if gc is None:
+            gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
+            gc.token = args.girderToken
+            gc.authenticate('admin', 'password')
+
+            # check to make sure we have access to server
+            if not [x for x in list(gc.listCollection()) if x['name'] == 'Active Learning']:
+                raise Exception("Unable to authenticate with girder")
 
         with ProgressHelper(
                 'Superpixel Classification', 'Superpixel classification', args.progress) as prog:
@@ -853,16 +909,19 @@ class SuperpixelClassificationBase:
                     gc, args.images, args.annotationName, args.radius, args.magnification,
                     args.annotationDir, args.numWorkers, prog)
 
+            itemsAndAnnot = self.getItemsAndAnnotations(gc, args.images, args.annotationName)
             features = self.createFeatures(
-                gc, args.images, args.annotationName, args.features, args.patchSize,
-                args.numWorkers, prog)
+                gc, args.images, args.annotationName, itemsAndAnnot, args.features, args.patchSize,
+                args.numWorkers, prog, args.cutoff)
 
             if args.train:
+                print("Training...")
                 self.trainModel(
-                    gc, args.images, args.annotationName, features, args.modeldir, args.batchSize,
+                    gc, args.images, args.annotationName, itemsAndAnnot, features, args.modeldir, args.batchSize,
                     args.epochs, args.split, args.randominput, args.labels, args.exclude, prog)
 
+            print("Predicting labels...")
             self.predictLabels(
-                gc, args.images, args.annotationName, features, args.modeldir, args.annotationDir,
+                gc, args.images, args.annotationName, itemsAndAnnot, features, args.modeldir, args.annotationDir,
                 args.heatmaps, args.radius, args.magnification, args.certainty, args.batchSize,
                 prog)

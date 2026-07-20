@@ -532,12 +532,13 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         for cb in callbacks:
             cb.on_predict_begin(logs=logs)
 
+        # ds also needs to have information about the indices so that we can shuffle the data but still link it to an index
         ds: torch.utils.data.TensorDataset = torch.utils.data.TensorDataset(
             (
                 torch.from_numpy(np.array(ds_h5).transpose((0, 3, 2, 1)))
                 if self.feature_is_image
                 else torch.from_numpy(np.array(ds_h5))
-            ),
+            ), torch.from_numpy(indices),
         )
         if batchSize < 1:
             batchSize = self.findOptimalBatchSize(model, ds, training=False)
@@ -545,6 +546,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
         dl: torch.utils.data.DataLoader = torch.utils.data.DataLoader(ds, batch_size=batchSize)
         predictions: NDArray[np.float_] = np.zeros((num_superpixels, bayesian_samples, num_classes))
         catWeights: NDArray[np.float_] = np.zeros((num_superpixels, bayesian_samples, num_classes))
+        outIndices: NDArray[np.int64] = np.zeros(num_superpixels, dtype=np.int64)
         with torch.no_grad():
             model.eval()  # Tell torch that we will be doing predictions
             row: int = 0
@@ -567,6 +569,8 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
                 catWeights_raw = torch.nn.functional.softmax(predictions_raw, dim=-1)
                 predictions[row:new_row, :, :] = predictions_raw.detach().cpu().numpy()
                 catWeights[row:new_row, :, :] = catWeights_raw.detach().cpu().numpy()
+                outIndices[row:new_row] = data[1].detach().cpu().numpy().astype(np.int64)[:]
+
                 row = new_row
                 for cb in callbacks:
                     cb.on_predict_batch_end(i)
@@ -574,7 +578,7 @@ class SuperpixelClassificationTorch(SuperpixelClassificationBase):
             cb.on_predict_end({'outputs': predictions})
         prog.item_progress(item, 0.4)
         # scale to units
-        return catWeights, predictions
+        return catWeights, predictions, outIndices
 
     def findOptimalBatchSize(
         self, model: torch.nn.Module, ds: torch.utils.data.TensorDataset, training: bool,
