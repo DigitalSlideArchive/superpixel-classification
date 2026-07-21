@@ -349,6 +349,11 @@ class SuperpixelClassificationBase:
             gc.downloadFile(maskItem['largeImage']['fileId'], maskPath)
             tsMask = large_image.open(maskPath)
 
+            # background is used if we have a bounding box of 1 pixel in top left corner that is unlabeled. We do not want to extract features for that
+            has_background = elem['user']['bbox'][:4] == [0,0,1,1]
+            start_index = 1 if has_background else 0
+            unlabeled_samples = [i for i, x in enumerate(elem['values'][start_index:], start=start_index) if x == 0]
+
             with h5py.File(filePath, 'w') as fptr:
                 batch_size = 1024  # TODO: Is this the best value?
                 for batch_start in range(0, len(elem['values']), batch_size):
